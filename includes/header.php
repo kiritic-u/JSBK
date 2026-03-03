@@ -1,14 +1,14 @@
 <?php
 // includes/header.php
 /**
-                _ _                     ____  _                             
+                _ _                    ____  _                              
                | (_) __ _ _ __   __ _  / ___|| |__  _   _  ___              
             _  | | |/ _` | '_ \ / _` | \___ \| '_ \| | | |/ _ \             
            | |_| | | (_| | | | | (_| |  ___) | | | | |_| | (_) |            
             \___/|_|\__,_|_| |_|\__, | |____/|_| |_|\__,_|\___/             
-   ____   _____          _  __  |___/   _____   _   _  _          ____ ____ 
+   ____  _____          _  __  |___/  _____  _   _  _          ____ ____  
   / ___| |__  /         | | \ \/ / / | |___ /  / | | || |        / ___/ ___|
- | |  _    / /       _  | |  \  /  | |   |_ \  | | | || |_      | |  | |    
+ | |  _    / /       _  | |  \  /  | |   |_ \  | | | || |_      | |  | |   
  | |_| |  / /_   _  | |_| |  /  \  | |  ___) | | | |__   _|  _  | |__| |___ 
   \____| /____| (_)  \___/  /_/\_\ |_| |____/  |_|    |_|   (_)  \____\____|
                                                                             
@@ -73,6 +73,8 @@ $request_uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $is_home = in_array($request_uri, ['/', '/index.php', '/home']);
 $is_album = ($request_uri == '/album');
 $is_music = ($request_uri == '/music');
+// --- [新增] 关于页面的路由判断 ---
+$is_about = ($request_uri == '/about');
 ?>
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -241,6 +243,8 @@ $is_music = ($request_uri == '/music');
         <a href="/music" class="m-nav-item <?= $is_music ? 'active' : '' ?>"><i class="fa-solid fa-music"></i> 音乐馆</a>
         <a href="/love" class="m-nav-item <?= $request_uri == '/love' ? 'active' : '' ?>"><i class="fa-solid fa-heart"></i> Love</a>
         <a href="/friends" class="m-nav-item <?= $request_uri == '/friends' ? 'active' : '' ?>"><i class="fa-solid fa-link"></i> 友情链接</a>
+        <a href="/about" class="m-nav-item <?= $is_about ? 'active' : '' ?>"><i class="fa-solid fa-address-card"></i> 关于本站</a>
+        
         <?php if(conf('enable_chatroom') == '1'): ?>
         <a href="/chat" class="m-nav-item"><i class="fa-regular fa-comments"></i> 在线聊天室</a>
         <?php endif; ?>
@@ -264,6 +268,7 @@ $is_music = ($request_uri == '/music');
             <li><a href="/music" class="<?= $is_music ? 'active' : '' ?>"><i class="fa-solid fa-music"></i> 音乐馆</a></li>
             <li><a href="/love" class="<?= $request_uri == '/love' ? 'active' : '' ?>"><i class="fa-solid fa-heart"></i> Love</a></li>
             <li><a href="/friends" class="<?= $request_uri == '/friends' ? 'active' : '' ?>"><i class="fa-solid fa-link"></i> 友链</a></li>
+            <li><a href="/about" class="<?= $is_about ? 'active' : '' ?>"><i class="fa-solid fa-address-card"></i> 关于</a></li>
         </ul>
         <div class="nav-right">
             <div class="search-box">

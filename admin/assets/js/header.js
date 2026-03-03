@@ -2,13 +2,15 @@
  * ============================================================================
  * Admin Header Logic
  * ============================================================================
- * @description: 后台布局交互逻辑 (侧边栏切换)
-  * @author:      jiang shuo
- * @update:      2026-1-1
+ * @description: 后台全局交互逻辑 (侧边栏、在线更新、安全检测、通知中心)
+ * @author:      jiang shuo
+ * @update:      2026-3-3
  */
 
+// ============================================================================
+// 1. 基础布局交互 (侧边栏)
+// ============================================================================
 document.addEventListener('DOMContentLoaded', function() {
-    
     // 缓存 DOM 元素
     const sidebar = document.getElementById('sidebar');
     const overlay = document.querySelector('.sidebar-overlay');
@@ -25,23 +27,109 @@ document.addEventListener('DOMContentLoaded', function() {
         sidebar.classList.toggle('active');
         overlay.classList.toggle('active');
     };
-
-    // 绑定点击事件 (如果 toggleSidebar 没有直接在 HTML onclick 中使用)
-    // 注意：原代码直接在 HTML 中使用了 onclick="toggleSidebar()"
-    // 这里为了防止重复绑定，主要作为备用或增强逻辑
-    if(toggleBtn) {
-        // toggleBtn.addEventListener('click', window.toggleSidebar);
-    }
-
-    if(overlay) {
-        // overlay.addEventListener('click', window.toggleSidebar);
-    }
 });
-// admin/assets/js/header.js 追加代码
 
-// ================= 热更新检测逻辑 =================
+// ============================================================================
+// 2. 伪静态与安全检测中心 (铃铛通知)
+// ============================================================================
 document.addEventListener('DOMContentLoaded', function() {
-    // 每次会话仅检测一次，避免每次刷新都弹窗
+    const notiDropdown = document.getElementById('notiDropdown');
+    
+    // --- 通知中心下拉菜单控制 ---
+    window.toggleNotification = function(e) {
+        e.stopPropagation();
+        if(notiDropdown) notiDropdown.classList.toggle('show');
+    };
+
+    // 点击页面其他地方关闭通知下拉框
+    document.addEventListener('click', function(e) {
+        if (notiDropdown && !notiDropdown.contains(e.target) && e.target.id !== 'bellBtn') {
+            notiDropdown.classList.remove('show');
+        }
+    });
+
+    // --- 伪静态安全规则检测核心逻辑 ---
+    window.checkSecurityRules = function(isManual = false) {
+        const notiSecurity = document.getElementById('notiSecurity');
+        const bellBadge = document.getElementById('bellBadge');
+        
+        if (!notiSecurity || !bellBadge) return;
+
+        if (!isManual && localStorage.getItem('security_notice_dismissed_v106')) {
+            updateNotificationUI();
+            return; 
+        }
+        
+        // 【核心修复】：加上时间戳和 cache: 'no-store'，强制每次都去问服务器，不读本地缓存！
+        const checkUrl = '../pages/about.php?_t=' + new Date().getTime();
+        
+        fetch(checkUrl, { 
+            method: 'HEAD',
+            cache: 'no-store' 
+        })
+            .then(res => {
+                if (res.status === 200) {
+                    notiSecurity.style.display = 'block';
+                    bellBadge.style.display = 'block'; 
+                    if (isManual) alert('检测失败：物理文件仍可直接访问，请检查 Nginx 规则是否保存并重启！');
+                } else if (res.status === 403 || res.status === 404 || res.status === 405) {
+                    // 只要是被拦截的 HTTP 状态码，都算作安全！
+                    notiSecurity.style.display = 'none';
+                    if (isManual) {
+                        alert('太棒了！安全防护规则已生效，您的系统坚如磐石！');
+                        window.dismissSecurityNotice(); 
+                    }
+                }
+                updateNotificationUI();
+            })
+            .catch(err => {
+                // 如果跨域或者被硬性防火墙切断，也会走到这里，同样算作安全
+                notiSecurity.style.display = 'none';
+                if (isManual) {
+                    alert('太棒了！安全防护规则已生效！');
+                    window.dismissSecurityNotice();
+                }
+                updateNotificationUI();
+            });
+    };
+
+    // 用户点击忽略
+    window.dismissSecurityNotice = function() {
+        const notiSecurity = document.getElementById('notiSecurity');
+        localStorage.setItem('security_notice_dismissed_v106', 'true');
+        if(notiSecurity) notiSecurity.style.display = 'none';
+        updateNotificationUI();
+    };
+
+    // 更新界面状态（如果没有任何通知，显示“暂无通知”，并熄灭红点）
+    function updateNotificationUI() {
+        const notiSecurity = document.getElementById('notiSecurity');
+        const notiEmpty = document.getElementById('notiEmpty');
+        const bellBadge = document.getElementById('bellBadge');
+        
+        if(!notiSecurity || !notiEmpty || !bellBadge) return;
+
+        // 判断当前是否有可见的通知条目
+        let hasNotification = (notiSecurity.offsetHeight > 0); 
+        
+        if (hasNotification) {
+            notiEmpty.style.display = 'none';
+            bellBadge.style.display = 'block';
+        } else {
+            notiEmpty.style.display = 'block';
+            bellBadge.style.display = 'none';
+        }
+    }
+
+    // 页面加载后延迟 1 秒静默检测，不卡顿渲染
+    setTimeout(() => window.checkSecurityRules(false), 1000);
+});
+
+// ============================================================================
+// 3. OTA 热更新检测逻辑 (版本升级)
+// ============================================================================
+document.addEventListener('DOMContentLoaded', function() {
+    // 每次会话仅检测一次，避免每次刷新都向 COS 发送请求
     if (!sessionStorage.getItem('updateChecked')) {
         setTimeout(checkForUpdates, 2000); // 延迟2秒检测，不影响页面首屏加载
     }
@@ -64,7 +152,7 @@ function showUpdateModal(info) {
     // 将换行符转为 <br>
     document.getElementById('updateLog').innerHTML = info.changelog.replace(/\n/g, '<br>'); 
     
-    // 【核心修复】：直接将数据绑定在按钮的 HTML 属性上，彻底杜绝变量丢失
+    // 直接将数据绑定在按钮的 HTML 属性上，彻底杜绝变量丢失
     const btn = document.getElementById('btnDoUpdate');
     btn.dataset.version = info.version;
     btn.dataset.downloadUrl = info.download_url;
@@ -125,6 +213,10 @@ window.startUpdate = function() {
             progressFill.style.width = '100%';
             progressText.innerText = '更新成功！正在重启...';
             progressText.style.color = '#10b981';
+            
+            // 更新成功后，清除安全检测的“忽略”标记，因为更新可能引入了新的规则需求
+            localStorage.removeItem('security_notice_dismissed_v106');
+            
             setTimeout(() => window.location.reload(true), 1500); // 刷新页面以应用更新
         } else {
             throw new Error(data.message || '更新失败');

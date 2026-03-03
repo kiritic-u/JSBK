@@ -65,13 +65,16 @@ class WAF {
     private static function check_data($arr, $type) {
         if (!is_array($arr)) return;
 
+        // 【核心优化】：如果是已登录的管理员发起的 POST 请求，直接放行！
+        // 这样管理员就可以在后台自由地发布带有 <script>、SQL 或各类代码片段的技术文章了
+        if ($type === 'POST' && !empty($_SESSION['admin_logged_in'])) {
+            return; 
+        }
+
         foreach ($arr as $key => $value) {
             if (is_array($value)) {
                 self::check_data($value, $type); // 递归检查数组
             } else {
-                // 如果是管理员发文章，可能包含代码片段，需要放宽限制（可选）
-                // if ($type == 'POST' && strpos($_SERVER['REQUEST_URI'], '/admin') !== false) continue;
-
                 foreach (self::get_patterns() as $pattern) {
                     if (preg_match($pattern, $value) || preg_match($pattern, $key)) {
                         self::block_request("发现恶意特征 [$pattern] 在 $type 参数: $key => $value");

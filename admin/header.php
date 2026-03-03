@@ -26,7 +26,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
     <!-- 引入 FontAwesome -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <!-- 引入自定义全局样式 -->
-    <link href="assets/css/header.css" rel="stylesheet">
+    <link href="assets/css/header.css?v=<?= time() ?>" rel="stylesheet">
 </head>
 <body>
 
@@ -88,6 +88,9 @@ $current_page = basename($_SERVER['PHP_SELF']);
                 <a href="settings.php" class="nav-link <?= $current_page == 'settings.php' ? 'active' : '' ?>">
                     <i class="fas fa-sliders"></i> 网站设置
                 </a>
+                <a href="about_settings.php" class="nav-link <?= $current_page == 'about_settings.php' ? 'active' : '' ?>">
+                    <i class="fas fa-id-card"></i> 关于页面
+                </a>
             </div>
 
             <div class="user-bar">
@@ -113,7 +116,30 @@ $current_page = basename($_SERVER['PHP_SELF']);
                 </div>
                 <div class="header-tools">
                     <a href="../index.php" target="_blank" class="tool-btn" title="查看首页"><i class="fas fa-rocket"></i></a>
-                    <a href="#" class="tool-btn"><i class="far fa-bell"></i></a>
+                    
+                    <div class="tool-btn" id="bellBtn" title="通知中心" onclick="toggleNotification(event)">
+                        <i class="far fa-bell"></i>
+                        <span class="bell-badge" id="bellBadge"></span> <div class="notification-dropdown" id="notiDropdown" onclick="event.stopPropagation()">
+                            <div class="noti-header">
+                                系统通知 <i class="fas fa-check-double" style="color:#94a3b8; cursor:pointer;" title="全部标为已读"></i>
+                            </div>
+                            <div class="noti-list">
+                                <div class="noti-empty" id="notiEmpty">
+                                    <i class="fas fa-inbox" style="font-size: 24px; margin-bottom: 8px; opacity: 0.5;"></i><br>暂无新通知
+                                </div>
+                                
+                                <div class="noti-item-security" id="notiSecurity">
+                                    <h4><i class="fas fa-shield-halved"></i> 安全规则未配置</h4>
+                                    <p>检测到物理 PHP 文件仍可被外部访问，请在 Nginx 中追加以下防盗链规则：</p>
+                                    <code>if ($request_uri ~* ^/(pages|includes|install)/.*\.php) {return 403;}</code>
+                                    <div class="noti-action-bar">
+                                        <button class="noti-btn noti-btn-check" onclick="checkSecurityRules(true)">重新检测</button>
+                                        <button class="noti-btn noti-btn-ignore" onclick="dismissSecurityNotice()">忽略</button>
+                                    </div>
+                                </div>
+                                </div>
+                        </div>
+                    </div>
                 </div>
             </header>
 

@@ -252,3 +252,146 @@ body {
     .grid-wrapper { padding: 16px; }
     .user-bar { padding-bottom: env(safe-area-inset-bottom); }
 }
+/* ========================================================= */
+/* 6. Notification Bell & Dropdown (通知铃铛与下拉弹窗)      */
+/* ========================================================= */
+.tool-btn { position: relative; } /* 确保 tool-btn 可以作为绝对定位的参照物 */
+
+/* 铃铛上的红点 */
+.bell-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 8px;
+    height: 8px;
+    background-color: #ef4444; /* 醒目红 */
+    border-radius: 50%;
+    display: none; /* 默认隐藏 */
+    box-shadow: 0 0 0 2px #fff;
+    animation: pulse-red 2s infinite;
+}
+
+@keyframes pulse-red {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+/* 通知下拉框 */
+.notification-dropdown {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    width: 320px;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.1), 0 0 0 1px rgba(0,0,0,0.05);
+    z-index: 100;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-10px);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: default;
+}
+
+.notification-dropdown.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+/* 小尖角 */
+.notification-dropdown::before {
+    content: '';
+    position: absolute;
+    top: -6px;
+    right: 14px;
+    width: 12px;
+    height: 12px;
+    background: #fff;
+    transform: rotate(45deg);
+    border-top: 1px solid rgba(0,0,0,0.05);
+    border-left: 1px solid rgba(0,0,0,0.05);
+}
+
+.noti-header {
+    padding: 15px 20px;
+    border-bottom: 1px solid #f1f5f9;
+    font-weight: 600;
+    font-size: 14px;
+    color: #1e293b;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.noti-list {
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 10px;
+}
+
+.noti-empty {
+    padding: 30px;
+    text-align: center;
+    color: #94a3b8;
+    font-size: 13px;
+    display: none; /* 默认隐藏，JS控制 */
+}
+
+/* 伪静态安全通知专属样式 */
+.noti-item-security {
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 10px;
+    padding: 12px;
+    display: none; /* 默认隐藏，JS检测后显示 */
+}
+
+.noti-item-security h4 {
+    margin: 0 0 6px 0;
+    color: #b45309;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.noti-item-security p {
+    margin: 0;
+    font-size: 12px;
+    color: #92400e;
+    line-height: 1.5;
+}
+
+.noti-item-security code {
+    display: block;
+    background: rgba(255,255,255,0.7);
+    padding: 8px;
+    border-radius: 6px;
+    margin-top: 8px;
+    font-family: Consolas, monospace;
+    font-size: 11px;
+    color: #059669;
+    word-break: break-all;
+}
+
+.noti-action-bar {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+.noti-btn {
+    flex: 1;
+    padding: 6px 0;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.2s;
+}
+.noti-btn-check { background: #f59e0b; color: #fff; }
+.noti-btn-check:hover { background: #d97706; }
+.noti-btn-ignore { background: transparent; border: 1px solid #fcd34d; color: #b45309; }
+.noti-btn-ignore:hover { background: rgba(251, 191, 36, 0.2); }
