@@ -89,7 +89,7 @@ $is_about = ($request_uri == '/about');
     <?php if($bd = conf('baidu_verify')): ?><meta name="baidu-site-verification" content="<?= $bd ?>" /><?php endif; ?>
     <?php if($gg = conf('google_verify')): ?><meta name="google-site-verification" content="<?= $gg ?>" /><?php endif; ?>
     
-    <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.staticfile.net/font-awesome/6.4.0/css/all.min.css">
     
     <?php if ($is_home): ?>
     <link rel="stylesheet" href="../pages/assets/css/home.css?v=<?= time() ?>">

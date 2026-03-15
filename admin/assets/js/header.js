@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const checkUrl = '../pages/about.php?_t=' + new Date().getTime();
         
         fetch(checkUrl, { 
-            method: 'HEAD',
+            method: 'GET',
             cache: 'no-store' 
         })
             .then(res => {

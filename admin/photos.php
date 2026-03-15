@@ -60,39 +60,49 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             }
         }
     }
-
-    // B. [修改] 批量发布新照片
+}
+    // B. [修改] 批量发布新照片/视频 (支持本地与网络链接，支持AJAX)
     if (isset($_POST['action']) && $_POST['action'] == 'upload_photo') {
         $album_id = intval($_POST['album_id'] ?? 0);
         $base_title = trim($_POST['title'] ?? ''); // 基础标题
         $device = trim($_POST['device'] ?? '');
         $is_featured = isset($_POST['is_featured']) ? 1 : 0;
+        $is_ajax = isset($_POST['is_ajax']) ? 1 : 0; // 是否为AJAX请求
         
-        // 读取 COS 设置
-        $stmt_cos = $pdo->prepare("SELECT value FROM settings WHERE key_name = 'cos_enabled'");
-        $stmt_cos->execute();
-        $cosEnabled = $stmt_cos->fetchColumn(); 
+        $success_count = 0;
 
-        // [核心修改] 检测 image_files 数组
+        // 1. 优先处理网络链接 (支持多行批量添加)
+        if (!empty($_POST['network_url'])) {
+            $urls = explode("\n", $_POST['network_url']);
+            foreach ($urls as $url) {
+                $url = trim($url);
+                if (empty($url)) continue;
+                $stmt = $pdo->prepare("INSERT INTO photos (album_id, title, device, image_url, is_featured) VALUES (?, ?, ?, ?, ?)");
+                $stmt->execute([$album_id, $base_title, $device, $url, $is_featured]);
+                $success_count++;
+            }
+        }
+
+        // 2. 处理本地文件上传
         if ($album_id > 0 && isset($_FILES['image_files'])) {
-            $files = $_FILES['image_files'];
-            // 获取上传文件数量
-            $file_count = count($files['name']);
-            $success_count = 0;
+            $stmt_cos = $pdo->prepare("SELECT value FROM settings WHERE key_name = 'cos_enabled'");
+            $stmt_cos->execute();
+            $cosEnabled = $stmt_cos->fetchColumn(); 
 
-            // 循环处理每一张图片
+            $files = $_FILES['image_files'];
+            $file_count = count($files['name']);
+
             for ($i = 0; $i < $file_count; $i++) {
                 if ($files['error'][$i] === UPLOAD_ERR_OK) {
                     $tmp_name = $files['tmp_name'][$i];
                     $name = $files['name'][$i];
                     $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
 
-                    if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
-                        // 生成唯一文件名，防止重名
-                        $newName = 'photo_' . date('Ymd_His_') . uniqid() . '_' . $i . '.' . $ext;
+                    // 支持图片和视频格式
+                    if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'webm', 'mov'])) {
+                        $newName = 'media_' . date('Ymd_His_') . uniqid() . '_' . $i . '.' . $ext;
                         $final_url = '';
 
-                        // COS 上传
                         if ($cosEnabled == '1') {
                             require_once '../includes/cos_helper.php';
                             $cosPath = 'uploads/' . date('Ym') . '/' . $newName;
@@ -100,10 +110,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             if ($cosUrl) $final_url = $cosUrl;
                         }
 
-                        // 本地回退
                         if (empty($final_url)) {
-                            $uploadDirRel = '../assets/uploads/'; // 物理路径
-                            $uploadDirWeb = '/assets/uploads/';   // 网页路径
+                            $uploadDirRel = '../assets/uploads/'; 
+                            $uploadDirWeb = '/assets/uploads/';   
                             if (!is_dir($uploadDirRel)) @mkdir($uploadDirRel, 0755, true);
                             if (move_uploaded_file($tmp_name, $uploadDirRel . $newName)) {
                                 $final_url = $uploadDirWeb . $newName;
@@ -111,27 +120,29 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         }
 
                         if (!empty($final_url)) {
-                            // 如果用户没有填标题，默认空；如果填了，所有图片共用一个标题
-                            $this_title = $base_title;
-                            
                             $stmt = $pdo->prepare("INSERT INTO photos (album_id, title, device, image_url, is_featured) VALUES (?, ?, ?, ?, ?)");
-                            $stmt->execute([$album_id, $this_title, $device, $final_url, $is_featured]);
+                            $stmt->execute([$album_id, $base_title, $device, $final_url, $is_featured]);
                             $success_count++;
                         }
                     }
                 }
             }
-
-            if ($success_count > 0) {
-                clearPhotoAndAlbumCache();
-            }
         }
+
+        if ($success_count > 0) {
+            clearPhotoAndAlbumCache();
+        }
+        
+        ob_end_clean();
+        // 如果是 AJAX 请求，返回 JSON 并不刷新页面
+        if ($is_ajax) {
+            header('Content-Type: application/json');
+            echo json_encode(['status' => 'success', 'count' => $success_count]);
+        } else {
+            header("Location: photos.php"); 
+        }
+        exit;
     }
-    
-    ob_end_clean();
-    header("Location: photos.php"); 
-    exit;
-}
 
 // --- 3. 处理单个删除 (保持不变) ---
 if (isset($_GET['action']) && $_GET['action'] == 'delete' && isset($_GET['id'])) {
@@ -206,6 +217,14 @@ ob_end_flush();
     
     /* 筛选下拉框样式 */
     .filter-select { padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 6px; outline: none; font-size: 14px; margin-right: 10px; }
+    /* ===== 重点：新增的选项卡和进度条样式 ===== */
+    .upload-tabs { display: flex; gap: 20px; margin-bottom: 15px; border-bottom: 1px solid #e2e8f0; }
+    .upload-tab { padding: 8px 4px; cursor: pointer; font-size: 14px; color: #64748b; border-bottom: 2px solid transparent; transition: all 0.2s; margin-bottom: -1px; }
+    .upload-tab:hover { color: #333; }
+    .upload-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+    
+    .progress-bar-bg { width: 100%; height: 8px; background: #e2e8f0; border-radius: 99px; overflow: hidden; }
+    .progress-bar-fill { height: 100%; background: var(--primary); width: 0%; border-radius: 99px; transition: width 0.2s ease-out; }
 </style>
 
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -269,9 +288,20 @@ ob_end_flush();
             <div class="photo-card" onclick="toggleSelect(this)">
                 <input type="checkbox" name="ids[]" value="<?= $p['id'] ?>" class="pc-checkbox" onclick="event.stopPropagation(); toggleSelect(this.closest('.photo-card'))">
                 <div class="pc-img-box">
-                    <img src="<?= htmlspecialchars($p['image_url']) ?>" 
-                         loading="lazy" 
-                         onerror="this.src='assets/img/error.png'">
+                    <?php 
+                        $file_ext = strtolower(pathinfo($p['image_url'], PATHINFO_EXTENSION));
+                        $is_video = in_array($file_ext, ['mp4', 'webm', 'mov']);
+                    ?>
+                    <?php if($is_video): ?>
+                        <video src="<?= htmlspecialchars($p['image_url']) ?>" 
+                               muted preload="metadata" 
+                               onmouseover="this.play()" onmouseout="this.pause()"></video>
+                        <div class="video-indicator"><i class="fas fa-play-circle"></i></div>
+                    <?php else: ?>
+                        <img src="<?= htmlspecialchars($p['image_url']) ?>" 
+                             loading="lazy" 
+                             onerror="this.src='assets/img/error.png'">
+                    <?php endif; ?>
                     
                     <?php if($p['is_featured']): ?>
                         <span class="badge-hero"><i class="fas fa-star"></i> 精选</span>
@@ -327,28 +357,45 @@ ob_end_flush();
             </div>
             
             <div class="modal-body">
-                <div class="form-group">
-                    <label for="cover-upload" class="form-label">选择图片文件 (可多选)</label>
-                    <label for="cover-upload" class="upload-area">
-                        <!-- [修改] name变更为数组，添加 multiple 属性，事件改为 previewImages -->
-                        <input type="file" name="image_files[]" id="cover-upload" accept="image/*" multiple onchange="previewImages(this)">
-                        
-                        <!-- 默认提示 -->
-                        <div id="upload-prompt">
-                            <div class="upload-icon"><i class="fas fa-cloud-upload-alt"></i></div>
-                            <div class="upload-text">点击或拖拽文件到此处 (支持多选)</div>
-                        </div>
-                        
-                        <!-- [修改] 新的预览网格容器 -->
-                        <div id="preview-container" style="display:none;">
-                            <div class="preview-grid" id="preview-grid">
-                                <!-- JS 将在这里动态插入 img 标签 -->
+                <div class="upload-tabs">
+                    <div class="upload-tab active" data-target="local-upload-area">本地上传</div>
+                    <div class="upload-tab" data-target="network-upload-area">网络链接</div>
+                </div>
+
+                <div id="local-upload-area" class="upload-section active">
+                    <div class="form-group">
+                        <label for="cover-upload" class="form-label">选择图片/视频文件 (可多选)</label>
+                        <label for="cover-upload" class="upload-area">
+                            <input type="file" name="image_files[]" id="cover-upload" accept="image/*,video/mp4,video/webm,video/quicktime" multiple onchange="previewImages(this)">
+                            <div id="upload-prompt">
+                                <div class="upload-icon"><i class="fas fa-cloud-upload-alt"></i></div>
+                                <div class="upload-text">点击或拖拽文件到此处 (支持多选)</div>
                             </div>
-                            <div style="margin-top:8px; font-size:12px; color:#64748b; text-align:center;">
-                                已选中 <span id="selected-count" style="color:var(--primary); font-weight:bold;">0</span> 张照片准备上传
+                            <div id="preview-container" style="display:none;">
+                                <div class="preview-grid" id="preview-grid"></div>
+                                <div style="margin-top:8px; font-size:12px; color:#64748b; text-align:center;">
+                                    已选中 <span id="selected-count" style="color:var(--primary); font-weight:bold;">0</span> 个文件准备上传
+                                </div>
                             </div>
-                        </div>
-                    </label>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="network-upload-area" class="upload-section" style="display:none;">
+                    <div class="form-group">
+                        <label class="form-label">输入媒体直链 (支持批量，每行一个)</label>
+                        <textarea name="network_url" class="form-control" rows="5" placeholder="https://example.com/image.jpg&#10;https://example.com/video.mp4" style="resize: vertical;"></textarea>
+                        <span style="font-size:12px; color:#94a3b8; margin-top:4px;">提示：直接保存链接，不占用服务器空间。</span>
+                    </div>
+                </div>
+
+                <div id="upload-progress-container" style="display:none; margin-top: 10px; margin-bottom: 15px;">
+                    <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:6px; color:var(--text-main); font-weight:500;">
+                        <span id="progress-text">准备上传... 0%</span>
+                    </div>
+                    <div class="progress-bar-bg">
+                        <div id="upload-progress-bar" class="progress-bar-fill"></div>
+                    </div>
                 </div>
                 
                 <!-- [样式修正] form-row 在移动端会强制 flex-direction: row -->
@@ -387,6 +434,6 @@ ob_end_flush();
     </div>
 </div>
 
-<script src="assets/js/photos.js"></script>
+<script src="assets/js/photos.js?v=<?= time() ?>"></script>
 
 <?php require 'footer.php'; ?>

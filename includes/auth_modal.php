@@ -70,7 +70,6 @@
     .glass-input { width: 100%; padding: 14px 16px; background: #f7f7f9; border: 2px solid transparent; border-radius: 12px; font-size: 15px; color: #333; outline: none; transition: 0.3s; box-sizing: border-box; font-weight: 500; }
     .glass-input:focus { background: #fff; border-color: #000; }
     
-    /* 找回密码专用链接样式 */
     .forgot-trigger { display: block; text-align: right; font-size: 12px; color: #999; margin-top: -5px; margin-bottom: 15px; cursor: pointer; }
     .forgot-trigger:hover { color: #000; text-decoration: underline; }
 
@@ -85,6 +84,23 @@
     @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
     .status-alert.error { background: #fff2f0; color: #ff4d4f; border: 1px solid #ffccc7; }
     .status-alert.success { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; animation: none; }
+
+    /* --- 新增：第三方登录样式 --- */
+    .social-login-wrapper { margin-top: 25px; text-align: center; }
+    .social-divider { display: flex; align-items: center; margin-bottom: 20px; }
+    .social-divider .line { flex: 1; height: 1px; background: #e2e8f0; }
+    .social-divider span { padding: 0 15px; color: #94a3b8; font-size: 12px; font-weight: 500; }
+    
+    .social-icons { display: flex; justify-content: center; gap: 20px; }
+    .social-btn {
+        width: 45px; height: 45px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        text-decoration: none; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .social-btn:hover { transform: translateY(-3px); }
+    .btn-qq { background: #ebf5ff; color: #00a1d6; box-shadow: 0 4px 10px rgba(0,161,214,0.1); }
+    .btn-wx { background: #e6f7ec; color: #07c160; box-shadow: 0 4px 10px rgba(7,193,96,0.1); }
+    .btn-dy { background: #1c1c1e; color: #fff; box-shadow: 0 4px 10px rgba(0,0,0,0.15); }
 
     @media (max-width: 768px) {
         .auth-card { flex-direction: column; width: 100%; min-height: auto; }
@@ -116,7 +132,6 @@
             <div class="status-alert" id="authAlert"></div>
 
             <div class="forms-wrapper">
-                <!-- 登录表单 -->
                 <form id="modalLoginForm" class="auth-form active" onsubmit="handleLogin(event)">
                     <input type="hidden" name="action" value="login">
                     <input type="hidden" name="ajax" value="1">
@@ -126,14 +141,48 @@
                     <div class="input-box code-row">
                         <input type="text" name="captcha" class="glass-input" placeholder="验证码" required autocomplete="off">
                         <div class="captcha-img-box">
-                            <!-- 🔥 核心修复：src 留空，防止页面加载时产生竞争 Session -->
                             <img src="" class="captcha-img" onclick="refreshCaptchas()" alt="点击加载">
                         </div>
                     </div>
                     <button type="submit" class="submit-btn" id="loginBtn">立即登录</button>
+                <?php 
+                        // 获取三大平台的开关状态（默认开启）
+                        $wx_on = conf('enable_login_wx', '1') == '1';
+                        $qq_on = conf('enable_login_qq', '1') == '1';
+                        $dy_on = conf('enable_login_dy', '1') == '1';
+                        
+                        // 只要有任意一个平台开启，才显示底部的分割线和图标区域
+                        if ($wx_on || $qq_on || $dy_on): 
+                    ?>
+                    <div class="social-login-wrapper">
+                        <div class="social-divider">
+                            <div class="line"></div>
+                            <span>或使用第三方快捷登录</span>
+                            <div class="line"></div>
+                        </div>
+                        <div class="social-icons">
+                            <?php if($qq_on): ?>
+                            <a href="/api/social_login.php?act=login&type=qq" class="social-btn btn-qq" title="QQ登录">
+                                <i class="fab fa-qq" style="font-size: 20px;"></i>
+                            </a>
+                            <?php endif; ?>
+                            
+                            <?php if($wx_on): ?>
+                            <a href="/api/social_login.php?act=login&type=wx" class="social-btn btn-wx" title="微信登录">
+                                <i class="fab fa-weixin" style="font-size: 20px;"></i>
+                            </a>
+                            <?php endif; ?>
+                            
+                            <?php if($dy_on): ?>
+                            <a href="/api/social_login.php?act=login&type=douyin" class="social-btn btn-dy" title="抖音登录">
+                                <i class="fab fa-tiktok" style="font-size: 20px;"></i>
+                            </a>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </form>
 
-                <!-- 注册表单 -->
                 <form id="modalRegForm" class="auth-form" onsubmit="handleRegister(event)">
                     <input type="hidden" name="action" value="register"><input type="hidden" name="ajax" value="1">
                     <div class="input-box"><input type="text" name="username" class="glass-input" placeholder="设置用户名 (唯一ID)" required></div>
@@ -142,7 +191,6 @@
                     <div class="input-box code-row">
                         <input type="text" id="mCaptcha" class="glass-input" placeholder="图形码" autocomplete="off">
                         <div class="captcha-img-box">
-                            <!-- 🔥 核心修复：src 留空 -->
                             <img src="" class="captcha-img" id="mCaptchaImg" onclick="refreshCaptchas()" alt="点击加载">
                         </div>
                     </div>
@@ -153,7 +201,6 @@
                     <button type="submit" class="submit-btn" id="regBtn">完成注册</button>
                 </form>
 
-                <!-- 找回密码表单 -->
                 <form id="modalForgotForm" class="auth-form" onsubmit="handleResetPassword(event)">
                     <input type="hidden" name="action" value="reset_password"><input type="hidden" name="ajax" value="1">
                     <div class="input-box"><input type="email" name="email" id="fEmail" class="glass-input" placeholder="绑定的电子邮箱" required></div>
@@ -161,7 +208,6 @@
                     <div class="input-box code-row">
                         <input type="text" id="fCaptcha" class="glass-input" placeholder="图形码" autocomplete="off">
                         <div class="captcha-img-box">
-                            <!-- 🔥 核心修复：src 留空 -->
                             <img src="" class="captcha-img" id="fCaptchaImg" onclick="refreshCaptchas()" alt="点击加载">
                         </div>
                     </div>
@@ -186,14 +232,11 @@
     // 打开弹窗
     function openAuthModal(type = 'login') { 
         authOverlay.classList.add('active'); 
-        // 🔥 修复：打开时只切换标签，不在这里刷新所有验证码
-        // 验证码刷新逻辑移交给了 switchTab
         switchTab(type); 
     }
 
     function closeAuth() { 
         authOverlay.classList.remove('active'); 
-        // 关闭时清空，防止下次打开闪烁
         setTimeout(() => {
             document.querySelectorAll('.captcha-img').forEach(img => img.src = '');
         }, 300);
@@ -208,14 +251,11 @@
         img.src = AUTH_API_PATH + 'captcha.php?t=' + new Date().getTime() + Math.random();
     }
 
-    // 🔥 核心修复：切换标签时，只刷新当前标签下的验证码
+    // 切换标签时刷新对应验证码
     function switchTab(type) {
         authAlert.style.display = 'none';
         
-        // 1. 切换按钮状态
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        
-        // 2. 切换表单显示
         document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
         
         let activeFormId = '';
@@ -233,8 +273,6 @@
         if (activeForm) {
             activeForm.classList.add('active');
             
-            // 🔥🔥🔥 关键：只找到当前表单里的图片进行刷新！
-            // 其他表单的图片保持不动（或者是空的），防止 Session 覆盖
             const img = activeForm.querySelector('.captcha-img');
             if (img) {
                 refreshCaptcha(img);
@@ -263,7 +301,6 @@
                     showMsg(d.msg, 'error'); 
                     btn.disabled = false; 
                     
-                    // 🔥 失败后，只刷新当前登录框的验证码
                     const img = document.querySelector('#modalLoginForm .captcha-img');
                     if(img) refreshCaptcha(img);
                     
@@ -300,7 +337,6 @@
                     btn.disabled=false; 
                     btn.innerText='获取'; 
                     
-                    // 🔥 失败后刷新当前验证码
                     const formId = type === 'register' ? 'modalRegForm' : 'modalForgotForm';
                     const img = document.querySelector('#' + formId + ' .captcha-img');
                     if(img) refreshCaptcha(img);

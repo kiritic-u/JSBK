@@ -1,26 +1,34 @@
 <?php
 // pages/album.php
 /**
-                _ _                     ____  _                             
+                _ _                    ____  _                              
                | (_) __ _ _ __   __ _  / ___|| |__  _   _  ___              
             _  | | |/ _` | '_ \ / _` | \___ \| '_ \| | | |/ _ \             
            | |_| | | (_| | | | | (_| |  ___) | | | | |_| | (_) |            
             \___/|_|\__,_|_| |_|\__, | |____/|_| |_|\__,_|\___/             
-   ____   _____          _  __  |___/   _____   _   _  _          ____ ____ 
+   ____  _____          _  __  |___/  _____   _   _  _          ____ ____ 
   / ___| |__  /         | | \ \/ / / | |___ /  / | | || |        / ___/ ___|
  | |  _    / /       _  | |  \  /  | |   |_ \  | | | || |_      | |  | |    
  | |_| |  / /_   _  | |_| |  /  \  | |  ___) | | | |__   _|  _  | |__| |___ 
   \____| /____| (_)  \___/  /_/\_\ |_| |____/  |_|    |_|   (_)  \____\____|
                                                                             
-                               追求极致的美学                               
+                            追求极致的美学                               
 **/
 // 1. 引入公共头部
 require_once 'includes/header.php';
 
-// --- [新增] 腾讯云 COS 缩略图生成助手函数 ---
-// 动态拼接腾讯云图片处理参数：指定宽度等比缩放、开启渐进式加载(interlace/1)、图片质量80%
+// --- [新增] 辅助判断是否为视频格式 ---
+function isVideo($url) {
+    if (empty($url)) return false;
+    $ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION));
+    return in_array($ext, ['mp4', 'webm', 'mov']);
+}
+
+// --- [修改] 腾讯云 COS 缩略图生成助手函数 ---
 function getCosThumb($url, $width = 600) {
     if (empty($url)) return $url;
+    // 如果是视频，不要加图片处理参数
+    if (isVideo($url)) return $url;
     // 如果不是 http 开头，或者 URL 已经带有参数，则为了安全原样返回
     if (strpos($url, 'http') !== 0 || strpos($url, '?') !== false) {
         return $url;
@@ -33,7 +41,6 @@ function getCosThumb($url, $width = 600) {
 // A. 获取 Hero 推荐大图 (先读缓存)
 $heroes = Cache::get('photos_featured');
 if ($heroes === false) {
-    // 缓存未命中，查询数据库
     $stmt_hero = $pdo->query("
         SELECT p.id, p.album_id, p.title, p.device, p.image_url, a.name as album_name 
         FROM photos p 
@@ -42,14 +49,12 @@ if ($heroes === false) {
         ORDER BY p.id DESC
     ");
     $heroes = $stmt_hero->fetchAll();
-    // 将结果写入缓存，有效期15分钟 (900秒)
     Cache::set('photos_featured', $heroes, 900);
 }
 
 // B. 获取相册分类 (先读缓存)
 $albums = Cache::get('albums_list_with_count');
 if ($albums === false) {
-    // 缓存未命中，查询数据库
     $stmt_albums = $pdo->query("
         SELECT a.*, (SELECT COUNT(*) FROM photos WHERE album_id = a.id AND is_hidden = 0) as photo_count 
         FROM albums a 
@@ -57,14 +62,12 @@ if ($albums === false) {
         ORDER BY a.sort_order ASC
     ");
     $albums = $stmt_albums->fetchAll();
-    // 将结果写入缓存，有效期1小时 (3600秒)
     Cache::set('albums_list_with_count', $albums, 3600);
 }
 
-// C. 获取所有照片 (先读缓存) - 【警告】此部分数据量大时，应改为API分页加载
+// C. 获取所有照片 (先读缓存)
 $photos = Cache::get('photos_all_visible');
 if ($photos === false) {
-    // 缓存未命中，查询数据库
     $stmt_photos = $pdo->query("
         SELECT p.id, p.album_id, p.title, p.device, p.image_url, p.is_featured, a.name as album_name 
         FROM photos p 
@@ -73,7 +76,6 @@ if ($photos === false) {
         ORDER BY p.id DESC
     ");
     $photos = $stmt_photos->fetchAll();
-    // 将结果写入缓存，有效期15分钟 (900秒)
     Cache::set('photos_all_visible', $photos, 900);
 }
 ?>
@@ -113,9 +115,16 @@ if ($photos === false) {
         <div class="hero-slider-wrapper">
             <?php if(count($heroes) > 0): ?>
                 <?php foreach($heroes as $index => $hero): ?>
-                    <div class="hero-slide <?= $index === 0 ? 'active' : '' ?>" data-index="<?= $index ?>" onclick="openLightbox('<?= h($hero['image_url']) ?>')">
+                    <?php $is_vid = isVideo($hero['image_url']); ?>
+                    <div class="hero-slide <?= $index === 0 ? 'active' : '' ?>" data-index="<?= $index ?>" onclick="openLightbox('<?= h($hero['image_url']) ?>', <?= $is_vid ? 'true' : 'false' ?>)">
                         <div class="overlay-gradient"></div>
-                        <img src="<?= getCosThumb(h($hero['image_url']), 1200) ?>" class="featured-bg" alt="Featured">
+                        
+                        <?php if($is_vid): ?>
+                            <video src="<?= h($hero['image_url']) ?>" class="featured-bg" autoplay loop muted playsinline></video>
+                        <?php else: ?>
+                            <img src="<?= getCosThumb(h($hero['image_url']), 1200) ?>" class="featured-bg" alt="Featured">
+                        <?php endif; ?>
+                        
                         <div class="featured-content">
                             <span class="featured-tag">FEATURED</span>
                             <h1 class="featured-title"><?= h($hero['title'] ?: 'Untitled') ?></h1>
@@ -143,14 +152,27 @@ if ($photos === false) {
         <div class="category-scroll-container" id="categoryScroll">
             <div class="folder-card active" onclick="filterGallery('all', this)">
                 <div class="folder-tab">All</div>
-                <?php $cover = !empty($photos[0]['image_url']) ? $photos[0]['image_url'] : 'https://placehold.co/400x300'; ?>
-                <img src="<?= getCosThumb(h($cover), 400) ?>" class="folder-preview">
+                <?php 
+                    $cover = !empty($photos[0]['image_url']) ? $photos[0]['image_url'] : 'https://placehold.co/400x300'; 
+                    $is_vid_cover = isVideo($cover);
+                ?>
+                <?php if($is_vid_cover): ?>
+                    <video src="<?= h($cover) ?>" class="folder-preview" autoplay loop muted playsinline></video>
+                <?php else: ?>
+                    <img src="<?= getCosThumb(h($cover), 400) ?>" class="folder-preview">
+                <?php endif; ?>
                 <div class="folder-count"><?= count($photos) ?></div>
             </div>
+            
             <?php foreach($albums as $album): ?>
             <div class="folder-card" onclick="filterGallery('album-<?= $album['id'] ?>', this)">
                 <div class="folder-tab"><?= h($album['name']) ?></div>
-                <img src="<?= getCosThumb(h($album['cover_image']), 400) ?>" class="folder-preview">
+                <?php $is_vid_album = isVideo($album['cover_image']); ?>
+                <?php if($is_vid_album): ?>
+                    <video src="<?= h($album['cover_image']) ?>" class="folder-preview" autoplay loop muted playsinline></video>
+                <?php else: ?>
+                    <img src="<?= getCosThumb(h($album['cover_image']), 400) ?>" class="folder-preview">
+                <?php endif; ?>
                 <div class="folder-count"><?= $album['photo_count'] ?></div>
             </div>
             <?php endforeach; ?>
@@ -161,9 +183,17 @@ if ($photos === false) {
 
     <div class="gallery-masonry" id="galleryGrid">
         <?php foreach($photos as $photo): ?>
-        <div class="art-card album-<?= $photo['album_id'] ?>" onclick="openLightbox('<?= h($photo['image_url']) ?>')">
+        <?php $is_vid = isVideo($photo['image_url']); ?>
+        <div class="art-card album-<?= $photo['album_id'] ?>" onclick="openLightbox('<?= h($photo['image_url']) ?>', <?= $is_vid ? 'true' : 'false' ?>)">
             <?php if($photo['album_name']): ?><div class="art-badge"><?= h($photo['album_name']) ?></div><?php endif; ?>
-            <img src="<?= getCosThumb(h($photo['image_url']), 600) ?>" class="art-img" loading="lazy" alt="<?= h($photo['title']) ?>">
+            
+            <?php if($is_vid): ?>
+                <video src="<?= h($photo['image_url']) ?>" class="art-img" autoplay loop muted playsinline></video>
+                <div class="video-indicator-front"><i class="fa-solid fa-play"></i></div>
+            <?php else: ?>
+                <img src="<?= getCosThumb(h($photo['image_url']), 600) ?>" class="art-img" loading="lazy" alt="<?= h($photo['title']) ?>">
+            <?php endif; ?>
+            
             <div class="art-info-panel">
                 <div class="art-text">
                     <h3><?= h($photo['title'] ?: 'Untitled') ?></h3>
@@ -184,7 +214,8 @@ if ($photos === false) {
 
 <div class="lightbox" id="lightbox">
     <div class="lb-close" onclick="closeLightbox()">&times;</div>
-    <img src="" class="lb-img" id="lbImage">
+    <img src="" class="lb-img" id="lbImage" style="display:none;">
+    <video src="" class="lb-video" id="lbVideo" controls autoplay style="display:none;"></video>
 </div>
 <script src="/pages/assets/js/album.js?v=<?php echo time(); ?>"></script>
 

@@ -109,7 +109,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if(container) loadArticles(true);
 
     // ==========================================
-    //       2. 聊天室逻辑
+    //       2. 聊天室逻辑 (保持不变)
     // ==========================================
     if (enableChatroom) {
         const chatContainer = document.getElementById('chatMessages');
@@ -171,9 +171,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 .then(res => res.json())
                 .then(res => {
                     if (!res.success) return;
-                    // ====== 【新增】实时动态监听禁言状态 ======
                     const isMuted = res.is_muted;
-                    window.siteData.chatroomMuted = isMuted; // 同步全局变量
+                    window.siteData.chatroomMuted = isMuted; 
                     
                     const chatInputDOM = document.getElementById('chatInput');
                     const chatSendBtnDOM = document.querySelector('.chat-send');
@@ -181,7 +180,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     if (chatInputDOM && chatSendBtnDOM) {
                         if (isMuted) {
-                            // 锁定 UI
                             chatInputDOM.disabled = true;
                             chatInputDOM.placeholder = "当前聊天室已全体禁言";
                             chatSendBtnDOM.disabled = true;
@@ -189,7 +187,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             chatSendBtnDOM.style.cursor = "not-allowed";
                             if(emojiBtnDOM) { emojiBtnDOM.disabled = true; emojiBtnDOM.style.opacity = "0.5"; }
                         } else {
-                            // 解除锁定（需结合登录状态）
                             chatInputDOM.disabled = !window.siteData.isUserLogin;
                             chatInputDOM.placeholder = window.siteData.isUserLogin ? "说点什么..." : "请先登录";
                             chatSendBtnDOM.disabled = false;
@@ -198,7 +195,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             if(emojiBtnDOM) { emojiBtnDOM.disabled = false; emojiBtnDOM.style.opacity = "1"; }
                         }
                     }
-                    // ===========================================
                     const messages = res.data || [];
                     if (messages.length === lastMsgCount && lastMsgCount !== 0) return;
                     lastMsgCount = messages.length;
@@ -260,7 +256,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ==========================================
-    //       3. 首页幻灯片切换逻辑
+    //       3. 首页幻灯片切换逻辑 (保持不变)
     // ==========================================
     const sliderTrack = document.getElementById('sliderTrack');
     if (sliderTrack) {
@@ -299,11 +295,71 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // ==========================================
-    //       4. 文章详情弹窗
+    //       4. 文章详情弹窗与积分系统 (核心更新)
     // ==========================================
     const modal = document.getElementById('articleModal');
     
-    window.openArticle = (id, pwd = '') => { // [修改] 增加 pwd 参数
+    // 付费阅读提交
+    window.payToRead = (id) => {
+        if (!isUserLogin) {
+            if(typeof openAuthModal === 'function') openAuthModal('login');
+            return;
+        }
+        if (!confirm('解锁文章将会扣除对应积分，确认继续吗？')) return;
+        
+        const btn = document.getElementById('payViewBtn');
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 处理中...';
+
+        const formData = new FormData();
+        formData.append('action', 'pay_view');
+        formData.append('id', id);
+
+        fetch('api/index.php', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    // 解锁成功，直接用刷新方式重新加载这篇文
+                    openArticle(id);
+                } else {
+                    alert(data.msg || '解锁失败，可能是积分不足');
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
+                }
+            }).catch(e => {
+                alert('网络错误，请重试');
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            });
+    };
+
+    // 付费下载资源
+    window.payToDownload = (id) => {
+        if (!isUserLogin) {
+            if(typeof openAuthModal === 'function') openAuthModal('login');
+            return;
+        }
+        if (!confirm('兑换此资源将扣除对应积分，确认继续吗？')) return;
+
+        const formData = new FormData();
+        formData.append('action', 'pay_resource');
+        formData.append('id', id);
+
+        fetch('api/index.php', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.link) {
+                    alert('兑换成功！您的积分已扣除。');
+                    window.open(data.link, '_blank');
+                    openArticle(id); // 刷新页面使其变为已解锁状态
+                } else {
+                    alert(data.msg || '兑换失败，可能是积分不足');
+                }
+            }).catch(e => { alert('网络错误，请重试'); });
+    };
+
+    window.openArticle = (id, pwd = '') => { 
         if(!modal) return;
         modal.classList.add('active');
         document.body.style.overflow = 'hidden';
@@ -311,11 +367,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const modalBody = document.getElementById('modalBody');
         modalBody.innerHTML = '<div style="text-align:center;padding:100px;color:#999;width:100%;"><i class="fa-solid fa-spinner fa-spin fa-2x"></i><br><br>加载中...</div>';
         
-        // [修改] fetch 的 URL 加上密码参数
         fetch(`api/index.php?action=get_article&id=${id}&pwd=${encodeURIComponent(pwd)}`).then(res => res.json()).then(data => {
             if (data.error) { modalBody.innerHTML = `<p style="text-align:center;padding:20px;">${data.error}</p>`; return; }
             
-            // --- [新增] 密码锁定界面渲染 ---
+            // --- 密码锁定界面渲染 ---
             if (data.require_password) {
                 modalBody.innerHTML = `
                     <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background: #f8fafc; position:relative; overflow:hidden;">
@@ -340,10 +395,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     确认解锁 <i class="fa-solid fa-arrow-right-long" style="margin-left: 6px; font-size: 12px;"></i>
                                 </button>
                             </div>
-                            
-                            <div style="margin-top: 28px; font-size: 12px; color: #cbd5e1; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;">
-                                JS·Blog Secure
-                            </div>
+                            <div style="margin-top: 28px; font-size: 12px; color: #cbd5e1; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;">JS·Blog Secure</div>
                         </div>
                         <style>
                             @keyframes pwdFloatUp {
@@ -354,29 +406,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 `;
                 
-                // 聚焦并绑定回车键，处理密码错误的情况
                 setTimeout(() => {
                     const pwdInput = document.getElementById('artPwdInput');
                     if (pwdInput) {
                         pwdInput.focus();
                         if (pwd !== '') {
-                            // 密码错误的视觉与动画反馈
                             pwdInput.style.borderColor = '#f87171';
                             pwdInput.style.backgroundColor = '#fef2f2';
                             pwdInput.style.color = '#ef4444';
                             pwdInput.value = '';
                             pwdInput.placeholder = '密码错误，请重试';
-                            
-                            // 错误抖动动画
                             const box = document.querySelector('.pwd-lock-box');
                             if(box) {
                                 box.animate([
-                                    { transform: 'translateX(0)' },
-                                    { transform: 'translateX(-8px)' },
-                                    { transform: 'translateX(8px)' },
-                                    { transform: 'translateX(-8px)' },
-                                    { transform: 'translateX(8px)' },
-                                    { transform: 'translateX(0)' }
+                                    { transform: 'translateX(0)' }, { transform: 'translateX(-8px)' },
+                                    { transform: 'translateX(8px)' }, { transform: 'translateX(-8px)' },
+                                    { transform: 'translateX(8px)' }, { transform: 'translateX(0)' }
                                 ], { duration: 400, easing: 'ease-in-out' });
                             }
                         }
@@ -385,9 +430,44 @@ document.addEventListener('DOMContentLoaded', () => {
                         });
                     }
                 }, 50);
-                return; // 密码不对，在此终止渲染
+                return; 
             }
-            // --- 锁定界面结束 ---
+
+            // --- [新增] 积分锁定阅读界面渲染 ---
+            if (data.require_view_points) {
+                modalBody.innerHTML = `
+                    <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background: #f8fafc; position:relative; overflow:hidden;">
+                        <div style="position:absolute; top:-20%; left:-10%; width:50%; height:50%; background:radial-gradient(circle, rgba(245,158,11,0.08) 0%, transparent 70%); border-radius:50%;"></div>
+                        <div style="position:absolute; bottom:-20%; right:-10%; width:50%; height:50%; background:radial-gradient(circle, rgba(236,72,153,0.08) 0%, transparent 70%); border-radius:50%;"></div>
+
+                        <div class="pwd-lock-box" style="position:relative; z-index:1; background: rgba(255,255,255,0.7); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); padding: 48px 40px; border-radius: 28px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.08), inset 0 1px 1px rgba(255,255,255,0.8); text-align: center; width: 85%; max-width: 360px; border: 1px solid rgba(255,255,255,0.6); transform: translateY(0); animation: pwdFloatUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);">
+                            
+                            <div style="width: 88px; height: 88px; background: linear-gradient(135deg, #fffbeb, #fef3c7); border-radius: 28px; display: flex; align-items: center; justify-content: center; margin: 0 auto 28px; box-shadow: inset 0 2px 4px rgba(255,255,255,1), 0 10px 20px rgba(0,0,0,0.05); transform: rotate(5deg);">
+                                <i class="fa-solid fa-gem" style="font-size: 36px; color: #d97706; background: linear-gradient(135deg, #d97706, #92400e); -webkit-background-clip: text; -webkit-text-fill-color: transparent;"></i>
+                            </div>
+                            
+                            <h3 style="margin: 0 0 10px 0; color: #0f172a; font-size: 24px; font-weight: 800; letter-spacing: 0.5px;">付费阅读文章</h3>
+                            <p style="font-size: 14px; color: #64748b; margin: 0 0 24px 0;">此内容需支付 <b style="color:#d97706; font-size:16px;">${data.view_points}</b> 积分才能解锁</p>
+                            
+                            <div style="background: rgba(0,0,0,0.04); padding: 12px; border-radius: 12px; margin-bottom: 30px; font-size: 13px; color: #64748b; display:flex; justify-content:space-between; align-items:center;">
+                                <span>我的余额:</span>
+                                <span style="color:#0f172a; font-weight:800; font-size:15px;">${data.user_points || 0} <i class="fa-solid fa-coins" style="color:#fbbf24; margin-left:4px;"></i></span>
+                            </div>
+                            
+                            <button id="payViewBtn" onclick="payToRead(${id})" style="width:100%; background: linear-gradient(135deg, #d97706, #b45309); color: #fff; border: none; padding: 16px; border-radius: 14px; cursor: pointer; font-size: 15px; font-weight: 700; letter-spacing: 1px; transition: all 0.3s ease; box-shadow: 0 8px 20px rgba(217,119,6,0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 24px rgba(217,119,6,0.4)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 8px 20px rgba(217,119,6,0.3)';">
+                                确认支付并解锁
+                            </button>
+                        </div>
+                        <style>
+                            @keyframes pwdFloatUp {
+                                0% { opacity: 0; transform: translateY(30px) scale(0.95); }
+                                100% { opacity: 1; transform: translateY(0) scale(1); }
+                            }
+                        </style>
+                    </div>`;
+                return;
+            }
+            // --- 积分锁定阅读界面结束 ---
 
             const createdDate = data.created_at ? data.created_at.substring(0, 10) : '未知日期';
 
@@ -453,27 +533,46 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            // [新增] 构建资源下载卡片 HTML
+            // --- [修改] 构建带有积分判定的资源下载卡片 ---
             let resourceHtml = '';
             if (data.resource_data) {
                 let resData = null;
-                try { resData = JSON.parse(data.resource_data); } catch(e) {}
+                try { resData = typeof data.resource_data === 'string' ? JSON.parse(data.resource_data) : data.resource_data; } catch(e) {}
                 
-                if (resData && resData.name && resData.link) {
-                    const isExternal = resData.link.startsWith('http');
-                    resourceHtml = `
-                    <div class="xhs-resource-card">
-                        <div class="res-icon">
-                            <i class="fa-solid fa-folder-closed"></i>
-                        </div>
-                        <div class="res-info">
-                            <div class="res-name" title="${resData.name}">${resData.name}</div>
-                            <div class="res-type">${isExternal ? '外部链接' : '本地资源'}</div>
-                        </div>
-                        <a href="${resData.link}" target="_blank" class="res-btn">
-                            <i class="fa-solid fa-cloud-arrow-down"></i> 下载
-                        </a>
-                    </div>`;
+                if (resData && resData.name) {
+                    const needPay = resData.need_pay; // 由后端接口标记
+                    const points = resData.points || 0;
+                    const isExternal = resData.link && resData.link.startsWith('http');
+
+                    if (needPay) {
+                        resourceHtml = `
+                        <div class="xhs-resource-card">
+                            <div class="res-icon" style="background:#fffbeb; color:#d97706;">
+                                <i class="fa-solid fa-lock"></i>
+                            </div>
+                            <div class="res-info">
+                                <div class="res-name" title="${resData.name}">${resData.name}</div>
+                                <div class="res-type" style="color:#d97706; font-weight:600;">消耗 ${points} 积分兑换</div>
+                            </div>
+                            <button onclick="payToDownload(${id})" class="res-btn" style="background:linear-gradient(135deg, #d97706, #b45309); border:none; cursor:pointer;">
+                                <i class="fa-solid fa-gem"></i> 兑换资源
+                            </button>
+                        </div>`;
+                    } else if (resData.link) {
+                        resourceHtml = `
+                        <div class="xhs-resource-card">
+                            <div class="res-icon">
+                                <i class="fa-solid fa-folder-closed"></i>
+                            </div>
+                            <div class="res-info">
+                                <div class="res-name" title="${resData.name}">${resData.name}</div>
+                                <div class="res-type">${isExternal ? '外部链接' : '本地资源'} ${points > 0 ? '<span style="color:#10b981; font-weight:bold; margin-left:4px;">(已解锁)</span>' : ''}</div>
+                            </div>
+                            <a href="${resData.link}" target="_blank" class="res-btn">
+                                <i class="fa-solid fa-cloud-arrow-down"></i> 下载
+                            </a>
+                        </div>`;
+                    }
                 }
             }
 
@@ -656,11 +755,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 300);
     }
 
-    // [新增] 提交文章密码
     window.submitArtPwd = (id) => {
         const pwdInput = document.getElementById('artPwdInput');
         if(pwdInput && pwdInput.value.trim() !== '') {
-            // 重新调用 openArticle 接口传入密码
             openArticle(id, pwdInput.value.trim());
         }
     };

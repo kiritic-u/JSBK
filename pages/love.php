@@ -103,7 +103,7 @@ $is_user_login = isset($_SESSION['user_id']);
 $user_avatar = $_SESSION['avatar'] ?? 'https://ui-avatars.com/api/?name=Guest';
 ?>
 
-<link href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&family=Noto+Serif+SC:wght@400;700&family=Ma+Shan+Zheng&display=swap" rel="stylesheet">
+<link href="https://fonts.loli.net/css2?family=Lato:wght@300;400;700&family=Noto+Serif+SC:wght@400;700&family=Ma+Shan+Zheng&display=swap" rel="stylesheet">
 
 <link rel="stylesheet" href="/pages/assets/css/love.css?v=<?php echo time(); ?>">
 

@@ -1,17 +1,17 @@
 <?php
 /**
-                _ _                     ____  _                             
+                _ _                    ____  _                              
                | (_) __ _ _ __   __ _  / ___|| |__  _   _  ___              
             _  | | |/ _` | '_ \ / _` | \___ \| '_ \| | | |/ _ \             
            | |_| | | (_| | | | | (_| |  ___) | | | | |_| | (_) |            
             \___/|_|\__,_|_| |_|\__, | |____/|_| |_|\__,_|\___/             
-   ____   _____          _  __  |___/   _____   _   _  _          ____ ____ 
+   ____  _____          _  __  |___/  _____  _  _  _          ____ ____ 
   / ___| |__  /         | | \ \/ / / | |___ /  / | | || |        / ___/ ___|
  | |  _    / /       _  | |  \  /  | |   |_ \  | | | || |_      | |  | |    
  | |_| |  / /_   _  | |_| |  /  \  | |  ___) | | | |__   _|  _  | |__| |___ 
   \____| /____| (_)  \___/  /_/\_\ |_| |____/  |_|    |_|   (_)  \____\____|
                                                                             
-                               追求极致的美学                               
+                                追求极致的美学                               
 **/
 // 1. 开启错误提示 (调试完成后可注释掉)
 ini_set('display_errors', 1);
@@ -31,7 +31,7 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 if (empty($_SESSION['user_id'])) {
-    header("Location: login.php");
+    header("Location: ../index.php"); // 改成跳回首页
     exit;
 }
 
@@ -40,7 +40,7 @@ $user_id = $_SESSION['user_id'];
 $msg = '';
 $msg_type = '';
 
-// --- 【关键修复】在此处手动加载网站配置，防止 conf() 报错 ---
+// --- 在此处手动加载网站配置，防止 conf() 报错 ---
 $stmt_set = $pdo->query("SELECT * FROM settings");
 $site_config = [];
 while ($row = $stmt_set->fetch()) {
@@ -51,7 +51,7 @@ while ($row = $stmt_set->fetch()) {
 if (!function_exists('conf')) {
     function conf($key, $default = '') {
         global $site_config;
-        return isset($site_config[$key]) && $site_config[$key] !== '' ? htmlspecialchars($site_config[$key]) : $default;
+        return isset($site_config[$key]) && $site_config[$key] !== '' ? $site_config[$key] : $default;
     }
 }
 // -----------------------------------------------------------
@@ -88,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 }
 
-// 5. 获取最新用户数据
+// 5. 获取最新用户数据及计算动态等级
 try {
     $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
     $stmt->execute([$user_id]);
@@ -99,6 +99,67 @@ try {
         header("Location: login.php");
         exit;
     }
+    
+    // ==========================================
+    // --- 动态读取配置并计算真实的等级和进度条 ---
+    // ==========================================
+    $current_points = max(0, intval($user['points']));
+    
+    // 解析后台设定的等级 JSON 配置
+    $user_levels_json = conf('user_levels_config', '[]');
+    $user_levels = json_decode($user_levels_json, true);
+    if (empty($user_levels)) {
+        // 兜底默认值
+        $user_levels = [
+            ['level' => 1, 'points' => 0, 'name' => '青铜会员'],
+            ['level' => 2, 'points' => 100, 'name' => '白银会员'],
+            ['level' => 3, 'points' => 500, 'name' => '黄金会员'],
+            ['level' => 4, 'points' => 1500, 'name' => '钻石会员'],
+            ['level' => 5, 'points' => 5000, 'name' => '星耀会员'],
+        ];
+    }
+    
+    // 确保等级数组按照需要的积分从小到大排序
+    usort($user_levels, function($a, $b) { return $a['points'] <=> $b['points']; });
+
+    $current_level_data = $user_levels[0]; // 默认取最低级
+    $next_level_data = null;
+
+    // 匹配当前用户的真实等级
+    foreach ($user_levels as $idx => $lvl) {
+        if ($current_points >= $lvl['points']) {
+            $current_level_data = $lvl;
+            if (isset($user_levels[$idx + 1])) {
+                $next_level_data = $user_levels[$idx + 1];
+            } else {
+                $next_level_data = null; // 已经是最高级了
+            }
+        } else {
+            break;
+        }
+    }
+
+    $current_level_num = $current_level_data['level'];
+    $current_level_name = $current_level_data['name'];
+
+    // 计算进度条
+    if ($next_level_data) {
+        $next_level_points = $next_level_data['points'];
+        $points_needed = $next_level_points - $current_points;
+        $level_base_points = $current_level_data['points']; // 本级的起点分数
+        
+        // 进度算法: (当前分数 - 本级起点) / (下级起点 - 本级起点) * 100
+        $gap = max(1, $next_level_points - $level_base_points);
+        $progress_percent = (($current_points - $level_base_points) / $gap) * 100;
+        $progress_percent = min(100, max(0, $progress_percent));
+    } else {
+        // 满级状态
+        $next_level_points = $current_points;
+        $points_needed = 0;
+        $progress_percent = 100;
+    }
+    // ==========================================
+
 } catch (Exception $e) {
     die("数据库连接或查询错误: " . $e->getMessage());
 }
@@ -108,7 +169,7 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>个人中心 | <?= conf('site_name', 'BLOG.') ?></title>
+    <title>个人中心 | <?= htmlspecialchars(conf('site_name', 'BLOG.')) ?></title>
     <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
@@ -178,6 +239,55 @@ try {
         .section-title { font-size: 20px; font-weight: 800; margin-bottom: 30px; display: flex; align-items: center; gap: 10px; }
         .section-title::before { content: ''; width: 6px; height: 24px; background: #000; border-radius: 3px; }
 
+        /* ====== 积分等级卡片样式 ====== */
+        .stats-card {
+            background: rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            border-radius: 20px;
+            padding: 24px 30px;
+            margin-bottom: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.03);
+            transition: transform 0.3s;
+        }
+        .stats-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.06);
+        }
+        .stats-group { display: flex; gap: 30px; flex-wrap: wrap;}
+        .stat-item { display: flex; flex-direction: column; gap: 6px; }
+        .stat-label { font-size: 13px; color: var(--text-sub); font-weight: 600; }
+        .stat-value { font-size: 24px; font-weight: 800; color: #1a1a1a; display: flex; align-items: center; gap: 8px; }
+        .level-badge {
+            font-size: 12px;
+            background: linear-gradient(135deg, #f6d365 0%, #fda085 100%);
+            color: #fff;
+            padding: 4px 10px;
+            border-radius: 12px;
+            margin-left: 8px;
+            transform: translateY(-3px);
+            box-shadow: 0 4px 10px rgba(253, 160, 133, 0.3);
+        }
+        
+        .progress-wrapper { flex: 1; margin-left: 40px; min-width: 250px;}
+        .progress-info { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-sub); margin-bottom: 8px; font-weight: 700; }
+        .progress-bar { height: 10px; background: rgba(0,0,0,0.06); border-radius: 5px; overflow: hidden; position: relative; }
+        .progress-fill { 
+            height: 100%; 
+            background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%); 
+            border-radius: 5px; 
+            transition: width 1s cubic-bezier(0.4, 0, 0.2, 1); 
+            position: relative;
+        }
+        .progress-fill::after {
+            content: ''; position: absolute; top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.4) 50%, rgba(255,255,255,0) 100%);
+            animation: shimmer 2s infinite;
+        }
+        @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+
         .glass-form { display: flex; flex-direction: column; gap: 25px; max-width: 480px; }
         .form-group { position: relative; }
         .form-label { display: block; font-size: 14px; font-weight: 700; color: var(--text-sub); margin-bottom: 8px; margin-left: 5px; }
@@ -209,7 +319,10 @@ try {
             .user-name { font-size: 20px; }
             .nav-menu { display: none; }
             .content { padding: 30px 20px; }
-            .section-title { font-size: 18px; }
+            .stats-card { flex-direction: column; align-items: flex-start; gap: 25px; padding: 20px; }
+            .stats-group { gap: 20px; }
+            .progress-wrapper { margin-left: 0; width: 100%; }
+            .section-title { font-size: 18px; margin-bottom: 20px; }
             .mobile-actions { margin-top: 30px; border-top: 1px solid rgba(0,0,0,0.05); padding-top: 20px; display: flex; gap: 15px; }
             .m-btn { flex: 1; padding: 12px; border-radius: 12px; text-align: center; font-weight: 600; font-size: 14px; text-decoration: none; }
             .m-home { background: #fff; color: #000; }
@@ -224,7 +337,6 @@ try {
     </div>
 
     <div class="dashboard-container">
-        <!-- 侧边栏 -->
         <div class="sidebar">
             <div class="avatar-wrapper">
                 <img src="<?= htmlspecialchars($user['avatar']) ?>" class="avatar" id="currentAvatar">
@@ -234,16 +346,14 @@ try {
                 <span class="user-id">@<?= htmlspecialchars($user['username']) ?></span>
             </div>
 
-            <!-- 桌面端菜单 -->
             <nav class="nav-menu">
                 <a href="../index.php" class="nav-btn"><i class="fa-solid fa-house"></i> 返回首页</a>
                 <a href="#" class="nav-btn active"><i class="fa-solid fa-user-gear"></i> 资料设置</a>
                 <div style="flex:1"></div>
-                <a href="../pages/logout.php" class="nav-btn logout"><i class="fa-solid fa-right-from-bracket"></i> 退出登录</a>
+                <a href="logout.php" class="nav-btn logout"><i class="fa-solid fa-right-from-bracket"></i> 退出登录</a>
             </nav>
         </div>
 
-        <!-- 主内容区 -->
         <div class="content">
             <?php if($msg): ?>
                 <div class="msg-box <?= $msg_type == 'success' ? 'msg-success' : 'msg-error' ?>">
@@ -252,6 +362,39 @@ try {
                 </div>
                 <script>setTimeout(() => document.querySelector('.msg-box').style.display='none', 3000);</script>
             <?php endif; ?>
+
+            <div class="stats-card">
+                <div class="stats-group">
+                    <div class="stat-item">
+                        <span class="stat-label">我的积分</span>
+                        <span class="stat-value">
+                            <i class="fa-solid fa-gem" style="color: #3498db;"></i> <?= $current_points ?>
+                        </span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">当前身份</span>
+                        <span class="stat-value">
+                            Lv.<?= $current_level_num ?> 
+                            <span class="level-badge"><?= htmlspecialchars($current_level_name) ?></span>
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="progress-wrapper">
+                    <div class="progress-info">
+                        <?php if ($next_level_data): ?>
+                            <span>距升级 [<?= htmlspecialchars($next_level_data['name']) ?>] 还需 <?= $points_needed ?> 分</span>
+                            <span><?= $current_points ?> / <?= $next_level_points ?></span>
+                        <?php else: ?>
+                            <span>已达到最高等级</span>
+                            <span><?= $current_points ?> / MAX</span>
+                        <?php endif; ?>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: <?= $progress_percent ?>%;"></div>
+                    </div>
+                </div>
+            </div>
 
             <div class="section-title">编辑资料</div>
 
@@ -266,7 +409,6 @@ try {
                     <input type="text" name="avatar" id="avatarInput" class="form-input" value="<?= htmlspecialchars($user['avatar']) ?>" placeholder="https://...">
                     <div class="input-hint">支持 URL 图片链接。推荐使用 DiceBear 随机头像：</div>
                     
-                    <!-- 快速头像选择 -->
                     <div class="avatar-presets">
                         <?php 
                         $seeds = ['Felix', 'Aneka', 'Zoe', 'Jack', 'Sam', 'Milo'];
@@ -285,10 +427,9 @@ try {
 
                 <button type="submit" class="save-btn">保存更改</button>
 
-                <!-- 移动端显示的底部按钮 -->
                 <div class="mobile-actions" style="display: none;">
                     <a href="../index.php" class="m-btn m-home">回首页</a>
-                    <a href="../pages/logout.php" class="m-btn m-logout">退出登录</a>
+                    <a href="logout.php" class="m-btn m-logout">退出登录</a>
                 </div>
             </form>
         </div>

@@ -477,3 +477,41 @@ body {
     from { opacity: 0; transform: translateY(20px); }
     to { opacity: 1; transform: translateY(0); }
 }
+/* --- 移动端“生涯”模块 UI 优化 --- */
+    @media (max-width: 768px) {
+        .career-chart-area {
+            /* 1. 开启横向滚动 */
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch; /* 保证 iOS 上的滑动惯性 */
+            
+            /* 2. 让滑动区域突破卡片的内边距，有一种“无边框滑动”的高级感 */
+            margin-left: -20px; 
+            margin-right: -20px;
+            padding-left: 20px;
+            padding-right: 20px;
+            
+            /* 3. 隐藏丑陋的默认滚动条 */
+            scrollbar-width: none; /* Firefox */
+        }
+        
+        .career-chart-area::-webkit-scrollbar {
+            display: none; /* Chrome, Safari, Edge */
+        }
+
+        .career-chart-scroll {
+            /* 4. 【核心修复】强制一个最小宽度。
+               哪怕手机屏幕只有 375px，这个图表也会保持 550px 的宽度，
+               从而把挤在一起的文字和色块强行撑开！*/
+            min-width: 550px; 
+            padding-bottom: 10px; /* 防止底部文字被裁切 */
+        }
+        
+        /* 稍微缩小移动端图表上的字号，让它看起来更精致 */
+        .t-label {
+            font-size: 12px !important; 
+        }
+        .t-year {
+            font-size: 11px !important;
+        }
+    }

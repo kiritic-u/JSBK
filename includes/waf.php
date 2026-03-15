@@ -1,126 +1,138 @@
 <?php
+// includes/waf.php
 /**
- * 全局应用防火墙 (Simple PHP WAF)
- * 功能：拦截 SQL 注入、XSS、路径遍历、恶意 User-Agent
- * /**
-                _ _                     ____  _                             
-               | (_) __ _ _ __   __ _  / ___|| |__  _   _  ___              
-            _  | | |/ _` | '_ \ / _` | \___ \| '_ \| | | |/ _ \             
-           | |_| | | (_| | | | | (_| |  ___) | | | | |_| | (_) |            
-            \___/|_|\__,_|_| |_|\__, | |____/|_| |_|\__,_|\___/             
-   ____   _____          _  __  |___/   _____   _   _  _          ____ ____ 
-  / ___| |__  /         | | \ \/ / / | |___ /  / | | || |        / ___/ ___|
- | |  _    / /       _  | |  \  /  | |   |_ \  | | | || |_      | |  | |    
- | |_| |  / /_   _  | |_| |  /  \  | |  ___) | | | |__   _|  _  | |__| |___ 
-  \____| /____| (_)  \___/  /_/\_\ |_| |____/  |_|    |_|   (_)  \____\____|
-                                                                            
-                               追求极致的美学                               
+ * 全局应用防火墙 (Simple PHP WAF) - 修复升级版 (含真实 IP 获取)
  */
 
 class WAF {
-    private static $log_file = __DIR__ . '/../security_log.php';  // 攻击日志路径
+    // 绝对不能用 .php 存日志！改为 .log 并配合 Nginx/Apache 禁止访问
+    private static $log_file = __DIR__ . '/../logs/security_intercept.log'; 
 
-    // 1. 启动防御
     public static function run() {
-        self::check_user_agent(); // 检查爬虫
-        self::check_data($_GET, 'GET'); // 检查 URL 参数
-        self::check_data($_POST, 'POST'); // 检查表单提交
-        self::check_data($_COOKIE, 'COOKIE'); // 检查 Cookie
+        // 确保在读取 $_SESSION 前，Session 已经启动
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+
+        self::check_user_agent();
+        self::check_data($_GET, 'GET');
+        self::check_data($_POST, 'POST');
+        self::check_data($_COOKIE, 'COOKIE');
     }
 
-    // 2. 恶意关键词黑名单 (正则)
+    // --- 新增：获取客户端真实 IP ---
+    private static function get_real_ip() {
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+
+        // 优先尝试获取反向代理传递的真实 IP
+        if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            // X-Forwarded-For 可能是逗号分隔的多个 IP，第一个通常是真实客户端
+            $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+            $ip = trim($ips[0]);
+        } elseif (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+            $ip = trim($_SERVER['HTTP_X_REAL_IP']);
+        }
+
+        // 验证提取出的 IP 是否合法，如果不合法（可能是黑客恶意伪造的头部），则退回使用 REMOTE_ADDR
+        return filter_var($ip, FILTER_VALIDATE_IP) ?: ($_SERVER['REMOTE_ADDR'] ?? 'Unknown IP');
+    }
+
     private static function get_patterns() {
         return [
-            // SQL 注入
+            // SQL 注入 (精简误杀率，移除单纯的 -- )
             '/select\s+.*from/i',
             '/union\s+select/i',
-            '/insert\s+into/i',
-            '/update\s+.*set/i',
-            '/delete\s+from/i',
+            '/insert\s+into\s+/i', // 增加 \s+ 减少误杀
             '/drop\s+table/i',
             '/information_schema/i',
-            '/--/i',  // 注释符
+            '/\/\*.*\*\//',        // 拦截 /* */ 形式的 SQL 注释
             
             // XSS 跨站脚本
-            '/<script/i',
-            '/javascript:/i',
-            '/on(click|load|error|mouse)\s*=/i',
-            '/\<iframe/i',
-            '/\<object/i',
+            '/<\s*script/i',       // 防绕过：< script
+            '/javascript\s*:/i',
+            '/on(click|load|error|mouseover|submit)\s*=/i',
+            '/<\s*iframe/i',
             
             // 路径遍历 / 系统命令
-            '/\.\.\//', // ../
+            '/\.\.\/\.\.\//',      // 必须是连续的 ../../ 才拦截，减少正常路径误杀
             '/etc\/passwd/i',
             '/cmd\.exe/i',
-            '/bin\/sh/i',
+            '/bin\/bash/i',        // bash 比 sh 更常见
             
-            // 危险函数
-            '/base64_decode/i',
-            '/eval\(/i',
-            '/system\(/i'
+            // 危险函数执行 (防止一句话木马)
+            '/eval\s*\(/i',
+            '/system\s*\(/i',
+            '/assert\s*\(/i'
         ];
     }
 
-    // 3. 递归检查数据
     private static function check_data($arr, $type) {
         if (!is_array($arr)) return;
 
-        // 【核心优化】：如果是已登录的管理员发起的 POST 请求，直接放行！
-        // 这样管理员就可以在后台自由地发布带有 <script>、SQL 或各类代码片段的技术文章了
+        // 管理员豁免权（仅限 POST，GET 依然拦截防止被 CSRF 攻击后台）
         if ($type === 'POST' && !empty($_SESSION['admin_logged_in'])) {
             return; 
         }
 
         foreach ($arr as $key => $value) {
             if (is_array($value)) {
-                self::check_data($value, $type); // 递归检查数组
+                self::check_data($value, $type);
             } else {
                 foreach (self::get_patterns() as $pattern) {
-                    if (preg_match($pattern, $value) || preg_match($pattern, $key)) {
-                        self::block_request("发现恶意特征 [$pattern] 在 $type 参数: $key => $value");
+                    // 只检查 value，检查 key 容易导致误杀且意义不大
+                    if (preg_match($pattern, $value)) {
+                        self::block_request("发现恶意特征在 $type 参数: $key");
                     }
                 }
             }
         }
     }
 
-    // 4. 检查恶意 User-Agent (扫描器/爬虫)
     private static function check_user_agent() {
         $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
-        $bad_bots = ['sqlmap', 'nikto', 'wpscan', 'python', 'curl', 'wget', 'java/']; // 常见攻击工具
+        // 移除 python 和 curl，作为面向开发者的博客，可能有正常脚本或 API 测试
+        // 保留常见的恶意漏洞扫描器
+        $bad_bots = ['sqlmap', 'nikto', 'wpscan', 'dirbuster', 'nmap', 'zmap']; 
         foreach ($bad_bots as $bot) {
             if (stripos($ua, $bot) !== false) {
-                self::block_request("拦截恶意 User-Agent: $ua");
+                self::block_request("拦截恶意扫描器: $bot");
             }
         }
     }
 
-    // 5. 拦截并记录日志
     private static function block_request($reason) {
-        if (!file_exists(self::$log_file)) {
-        file_put_contents(self::$log_file, "<?php exit(); ?>\n");
-    }
-        // 记录日志
+        // 确保日志目录存在
+        $log_dir = dirname(self::$log_file);
+        if (!is_dir($log_dir)) {
+            mkdir($log_dir, 0755, true);
+        }
+
+        // 净化输入，防止日志注入
+        $safe_uri = htmlspecialchars($_SERVER['REQUEST_URI'] ?? '', ENT_QUOTES, 'UTF-8');
+        $safe_ip  = self::get_real_ip(); // 使用新编写的真实 IP 获取函数
+        
         $log = sprintf("[%s] IP: %s | URL: %s | %s\n", 
             date('Y-m-d H:i:s'), 
-            $_SERVER['REMOTE_ADDR'], 
-            $_SERVER['REQUEST_URI'], 
+            $safe_ip, 
+            $safe_uri, 
             $reason
         );
+        
+        // 写入日志文件
         file_put_contents(self::$log_file, $log, FILE_APPEND);
 
-        // 终止执行，返回 403
+        // 终止执行
         http_response_code(403);
+        header('Content-Type: text/html; charset=utf-8');
         die('
             <div style="text-align:center; margin-top:100px; font-family:sans-serif;">
-                <h1 style="color:#ff4757; font-size:40px;">🚫 系统拦截</h1>
-                <p style="color:#666; font-size:18px;">您的请求包含非法字符或恶意行为。</p>
-                <p style="color:#999; font-size:12px;">ID: ' . md5(time()) . '</p>
+                <h1 style="color:#ff4757; font-size:40px;">🚫 WAF 拦截</h1>
+                <p style="color:#666; font-size:18px;">您的请求包含非法字符，已被系统拦截。</p>
+                <p style="color:#999; font-size:12px;">事件 ID: ' . uniqid('waf_') . '</p>
             </div>
         ');
     }
 }
 
-// 自动运行
 WAF::run();
 ?>

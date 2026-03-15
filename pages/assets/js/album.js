@@ -49,13 +49,34 @@ document.addEventListener('DOMContentLoaded', function() {
         resetTimer();
     }
 
-    // --- 灯箱 ---
+    // --- 灯箱 (增强支持视频) ---
     const lightbox = document.getElementById('lightbox');
     const lbImage = document.getElementById('lbImage');
+    const lbVideo = document.getElementById('lbVideo');
     
-    window.openLightbox = function(src) {
-        if (!lightbox || !lbImage) return;
-        lbImage.src = src;
+    // 增加了一个 isVideo 参数
+    window.openLightbox = function(src, isVideo = false) {
+        if (!lightbox) return;
+        
+        // 如果后端没有传 isVideo 参数，前端通过正则兜底判断
+        if (typeof isVideo !== 'boolean') {
+            isVideo = src.match(/\.(mp4|webm|mov)(\?.*)?$/i) !== null;
+        }
+
+        if (isVideo) {
+            lbImage.style.display = 'none';
+            lbImage.src = '';
+            lbVideo.style.display = 'block';
+            lbVideo.src = src;
+            lbVideo.play(); // 自动播放
+        } else {
+            lbVideo.style.display = 'none';
+            lbVideo.pause();
+            lbVideo.src = '';
+            lbImage.style.display = 'block';
+            lbImage.src = src;
+        }
+
         lightbox.classList.add('active');
         document.body.style.overflow = 'hidden';
     }
@@ -64,6 +85,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!lightbox) return;
         lightbox.classList.remove('active');
         document.body.style.overflow = '';
+        
+        // 关闭灯箱时务必停止视频播放
+        if(lbVideo) {
+            lbVideo.pause();
+            lbVideo.src = '';
+        }
     }
     
     if (lightbox) {

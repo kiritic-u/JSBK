@@ -1,18 +1,18 @@
 <?php
 // admin/settings.php
 /**
-                _ _                     ____  _                             
+                _ _                    ____  _                              
                | (_) __ _ _ __   __ _  / ___|| |__  _   _  ___              
             _  | | |/ _` | '_ \ / _` | \___ \| '_ \| | | |/ _ \             
            | |_| | | (_| | | | | (_| |  ___) | | | | |_| | (_) |            
             \___/|_|\__,_|_| |_|\__, | |____/|_| |_|\__,_|\___/             
-   ____   _____          _  __  |___/   _____   _   _  _          ____ ____ 
+   ____  _____          _  __  |___/  _____  _   _  _          ____ ____  
   / ___| |__  /         | | \ \/ / / | |___ /  / | | || |        / ___/ ___|
- | |  _    / /       _  | |  \  /  | |   |_ \  | | | || |_      | |  | |    
+ | |  _    / /       _  | |  \  /  | |   |_ \  | | | || |_      | |  | |   
  | |_| |  / /_   _  | |_| |  /  \  | |  ___) | | | |__   _|  _  | |__| |___ 
   \____| /____| (_)  \___/  /_/\_\ |_| |____/  |_|    |_|   (_)  \____\____|
                                                                             
-                               追求极致的美学                               
+                                追求极致的美学                               
 **/
 require_once '../includes/config.php';
 requireLogin(); 
@@ -28,7 +28,7 @@ $is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTT
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_FILES['import_file'])) {
     
-    // [新增] 1.1 处理清空缓存 AJAX 请求
+    // 1.1 处理清空缓存 AJAX 请求
     if (isset($_POST['action']) && $_POST['action'] === 'clear_cache') {
         header('Content-Type: application/json');
         if ($redis) {
@@ -49,10 +49,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_FILES['import_file'])) {
         } else {
             echo json_encode(['success' => false, 'message' => 'Redis 未连接，无法清理']);
         }
-        exit; // 结束执行，不继续往下跑保存逻辑
+        exit; // 结束执行
     }
 
-    // [原有] 1.2 保存设置逻辑
+    // 1.2 保存设置逻辑
     try {
         // 处理背景设置逻辑
         $bg_type = $_POST['site_bg_type'] ?? 'color';
@@ -78,11 +78,42 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_FILES['import_file'])) {
             'smtp_host','smtp_port','smtp_user','smtp_pass','smtp_from_name',
             'cos_secret_id','cos_secret_key','cos_bucket','cos_region','cos_domain',
             'ai_api_url','ai_api_key','ai_model_name','custom_css','custom_js',
-            'cos_enabled' 
+            'cos_enabled',
+            
+            // 新增：社交登录相关配置
+            'social_login_url', 'social_appid', 'social_appkey',
+            // 官方通道 vs 聚合通道选择
+            'social_login_mode', 
+            // 官方通道的独立密钥配置
+            'official_wx_appid', 'official_wx_appsecret',
+            'official_qq_appid', 'official_qq_appkey',
+            'official_dy_clientkey', 'official_dy_clientsecret'
         ];
 
         // 处理复选框
-        $checkboxes = ['enable_chatroom','enable_friend_links','enable_hot_tags','chatroom_muted','enable_loading_anim','redis_enabled'];
+        $checkboxes = ['enable_chatroom','enable_friend_links','enable_hot_tags','chatroom_muted','enable_loading_anim','redis_enabled', 'enable_login_wx', 'enable_login_qq', 'enable_login_dy'];
+        
+        // =========================================================================
+        // [动态修改 config.php 里的 REDIS_ENABLED 常量]
+        // =========================================================================
+        $config_path = '../includes/config.php';
+        if (file_exists($config_path)) {
+            if (!is_writable($config_path)) {
+                throw new Exception("文件无写入权限，请将 includes/config.php 的权限设置为 755 或 777");
+            }
+            
+            $config_content = file_get_contents($config_path);
+            $new_redis_status = isset($_POST['redis_enabled']) ? 'true' : 'false';
+            
+            $config_content = preg_replace(
+                "/define\(\s*['\"]REDIS_ENABLED['\"]\s*,\s*(true|false)\s*\);/i", 
+                "define('REDIS_ENABLED', {$new_redis_status});", 
+                $config_content
+            );
+            
+            file_put_contents($config_path, $config_content);
+        }
+        // =========================================================================
         
         foreach (array_merge($fields, $checkboxes) as $key) {
             if (in_array($key, $checkboxes)) {
@@ -105,6 +136,27 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_FILES['import_file'])) {
         $json_fl = json_encode($friend_links_data, JSON_UNESCAPED_UNICODE);
         $pdo->prepare("INSERT INTO settings (key_name, value) VALUES ('friend_links', ?) ON DUPLICATE KEY UPDATE value = ?")->execute([$json_fl, $json_fl]);
         
+        // --- 处理用户等级设置 (JSON) ---
+        $lvl_nums = $_POST['level_num'] ?? [];
+        $lvl_points = $_POST['level_points'] ?? [];
+        $lvl_names = $_POST['level_name'] ?? [];
+        $levels_data = [];
+        for($i=0; $i<count($lvl_nums); $i++) {
+            if(trim($lvl_nums[$i]) !== '') {
+                $levels_data[] = [
+                    'level' => intval($lvl_nums[$i]),
+                    'points' => intval($lvl_points[$i]),
+                    'name' => trim($lvl_names[$i])
+                ];
+            }
+        }
+        // 按等级数字升序排序，保证前台逻辑的连贯性
+        usort($levels_data, function($a, $b) { return $a['level'] <=> $b['level']; });
+        
+        $json_levels = json_encode($levels_data, JSON_UNESCAPED_UNICODE);
+        $pdo->prepare("INSERT INTO settings (key_name, value) VALUES ('user_levels_config', ?) ON DUPLICATE KEY UPDATE value = ?")->execute([$json_levels, $json_levels]);
+        // ------------------------------------
+
         // 保存后顺便清除一次配置缓存
         if ($redis) $redis->del(CACHE_PREFIX . 'site_settings'); 
         
@@ -115,11 +167,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_FILES['import_file'])) {
         }
         $msg = '<div class="alert alert-success">设置已保存成功</div>';
 
-    } catch (PDOException $e) {
+    } catch (Exception $e) { 
         if ($is_ajax) {
             header('Content-Type: application/json');
             http_response_code(500);
-            echo json_encode(['success' => false, 'message' => '数据库错误: ' . $e->getMessage()]);
+            echo json_encode(['success' => false, 'message' => '保存失败: ' . $e->getMessage()]);
             exit;
         }
         $msg = '<div class="alert alert-error">保存失败: ' . $e->getMessage() . '</div>';
@@ -127,7 +179,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_FILES['import_file'])) {
 }
 
 // --- 2. 其他 Action 处理 (GET) ---
-// (保留导出功能)
 if (isset($_GET['action']) && $_GET['action'] === 'export_settings') {
     header('Content-Type: application/json');
     header('Content-Disposition: attachment; filename="settings_backup_' . date('Ymd_His') . '.json"');
@@ -138,7 +189,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'export_settings') {
     exit;
 }
 
-// (保留导入功能)
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['import_file'])) {
     try {
         $file = $_FILES['import_file'];
@@ -166,16 +216,27 @@ $stmt = $pdo->query("SELECT * FROM settings");
 $settings = [];
 while ($row = $stmt->fetch()) { $settings[$row['key_name']] = $row['value']; }
 function getVal($key, $default = '') { global $settings; return isset($settings[$key]) ? htmlspecialchars($settings[$key]) : $default; }
+
 $friend_links = json_decode($settings['friend_links'] ?? '[]', true);
+
+// 读取用户等级配置，如为空则给一套默认值
+$user_levels = json_decode($settings['user_levels_config'] ?? '[]', true);
+if (empty($user_levels)) {
+    $user_levels = [
+        ['level' => 1, 'points' => 0, 'name' => '青铜会员'],
+        ['level' => 2, 'points' => 100, 'name' => '白银会员'],
+        ['level' => 3, 'points' => 500, 'name' => '黄金会员'],
+        ['level' => 4, 'points' => 1500, 'name' => '钻石会员'],
+        ['level' => 5, 'points' => 5000, 'name' => '星耀会员'],
+    ];
+}
 
 require 'header.php';
 ?>
 
-<!-- 引入单独的 CSS 文件 -->
 <link rel="stylesheet" href="assets/css/settings.css?v=<?= time() ?>">
 
 <div class="settings-wrapper">
-    <!-- 顶部标题与操作区 -->
     <div class="settings-header">
         <h1 class="page-title"><i class="fas fa-sliders-h"></i> 网站设置</h1>
         
@@ -184,26 +245,24 @@ require 'header.php';
                 <button type="button" class="btn btn-ghost" onclick="document.getElementById('importInput').click()"><i class="fas fa-upload"></i> 导入</button>
                 <a href="?action=export_settings" class="btn btn-ghost"><i class="fas fa-download"></i> 备份</a>
             </div>
-            <!-- 电脑端保存按钮 (右上角) -->
             <button type="button" class="btn btn-primary btn-save-desktop" onclick="saveSettings(this)">
                 <i class="fas fa-save"></i> 保存设置
             </button>
         </div>
     </div>
 
-    <!-- Tabs 导航 -->
     <div class="tabs-wrapper">
         <div class="tabs-header">
             <div class="tab-btn active" onclick="switchTab('basic')"><i class="fas fa-cog"></i> 基本</div>
             <div class="tab-btn" onclick="switchTab('home')"><i class="fas fa-home"></i> 首页</div>
             <div class="tab-btn" onclick="switchTab('style')"><i class="fas fa-palette"></i> 外观</div>
+            <div class="tab-btn" onclick="switchTab('users')"><i class="fas fa-users-cog"></i> 用户</div>
             <div class="tab-btn" onclick="switchTab('modules')"><i class="fas fa-cubes"></i> 模块</div>
             <div class="tab-btn" onclick="switchTab('services')"><i class="fas fa-server"></i> 服务</div>
             <div class="tab-btn" onclick="switchTab('custom')"><i class="fas fa-code"></i> 代码</div>
         </div>
     </div>
 
-    <!-- 导入表单 (隐藏) -->
     <form id="importForm" method="POST" enctype="multipart/form-data" style="display:none">
         <input type="file" name="import_file" id="importInput" accept=".json" onchange="if(confirm('覆盖当前配置？')) this.form.submit(); else this.value='';">
     </form>
@@ -211,7 +270,6 @@ require 'header.php';
     <form id="settingsForm" method="POST">
         <?= $msg ?>
         
-        <!-- 1. 基本信息 -->
         <div id="basic" class="tab-content active">
             <div class="section-card">
                 <h3 class="section-title">站点信息</h3>
@@ -240,7 +298,6 @@ require 'header.php';
             </div>
         </div>
 
-        <!-- 2. 首页设置 -->
         <div id="home" class="tab-content">
             <div class="section-card">
                 <h3 class="section-title">标语配置</h3>
@@ -260,7 +317,6 @@ require 'header.php';
             </div>
         </div>
 
-        <!-- 3. 外观设置 -->
         <div id="style" class="tab-content">
             <div class="section-card">
                 <h3 class="section-title">背景设置</h3>
@@ -279,7 +335,6 @@ require 'header.php';
                     </div>
                 </div>
 
-                <!-- 纯色输入 -->
                 <div id="bg-color" class="form-group bg-option">
                     <label class="form-label">选择颜色</label>
                     <div style="display:flex; gap:10px;">
@@ -287,12 +342,10 @@ require 'header.php';
                         <input type="text" name="bg_color_text" id="bgText" class="form-control" value="<?= getVal('site_bg_type')=='color'?getVal('site_bg_value'):'#f3f4f6' ?>">
                     </div>
                 </div>
-                <!-- 渐变输入 -->
                 <div id="bg-gradient" class="grid-2 bg-option" style="display:none;">
                     <div class="form-group"><label class="form-label">起始颜色</label><input type="color" name="site_bg_gradient_start" class="form-control" style="height:42px" value="<?= getVal('site_bg_gradient_start')?:'#a18cd1' ?>"></div>
                     <div class="form-group"><label class="form-label">结束颜色</label><input type="color" name="site_bg_gradient_end" class="form-control" style="height:42px" value="<?= getVal('site_bg_gradient_end')?:'#fbc2eb' ?>"></div>
                 </div>
-                <!-- 图片输入 -->
                 <div id="bg-image" class="form-group bg-option" style="display:none;">
                     <label class="form-label">图片 URL</label>
                     <input type="text" name="site_bg_value_image" class="form-control" value="<?= getVal('site_bg_type')=='image'?getVal('site_bg_value'):'' ?>" placeholder="https://...">
@@ -308,7 +361,37 @@ require 'header.php';
             </div>
         </div>
 
-        <!-- 4. 模块开关 -->
+        <div id="users" class="tab-content">
+            <div class="section-card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                    <h3 class="section-title" style="margin:0;">用户等级与积分配置</h3>
+                    <button type="button" class="btn btn-ghost" onclick="addLevel()" style="font-size:12px; padding:4px 10px;"><i class="fas fa-plus"></i> 添加等级</button>
+                </div>
+                <p class="section-desc">设定前台用户中心的等级阶梯。你可以配置升到该等级所需的总积分，以及前台显示的称号。请务必保留等级 1 作为初始默认等级。</p>
+                <div id="levels-container">
+                    <?php foreach($user_levels as $lvl): ?>
+                    <div class="level-item" style="display:flex; gap:10px; margin-bottom:10px; align-items: center;">
+                        <div class="form-group" style="margin-bottom:0; flex:1">
+                            <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">等级 (数字)</div>
+                            <input type="number" name="level_num[]" class="form-control" value="<?= htmlspecialchars($lvl['level']) ?>" placeholder="例: 1" required>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; flex:1">
+                            <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">所需总积分</div>
+                            <input type="number" name="level_points[]" class="form-control" value="<?= htmlspecialchars($lvl['points']) ?>" placeholder="例: 100" required>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; flex:2">
+                            <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">等级头衔/昵称</div>
+                            <input type="text" name="level_name[]" class="form-control" value="<?= htmlspecialchars($lvl['name']) ?>" placeholder="例: 白银会员" required>
+                        </div>
+                        <div style="padding-top: 20px;">
+                            <button type="button" class="btn btn-danger-ghost" onclick="removeLevel(this)" style="padding:0 10px; height: 38px;"><i class="fas fa-times"></i></button>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        </div>
+
         <div id="modules" class="tab-content">
             <div class="section-card">
                 <h3 class="section-title">功能开关</h3>
@@ -335,7 +418,6 @@ require 'header.php';
                     </label>
                 </div>
 
-                <!-- [修改] 优化清空缓存按钮 -->
                 <?php if(getVal('redis_enabled') == '1'): ?>
                     <div style="margin-top:20px; border-top:1px dashed #eee; padding-top:15px; display:flex; justify-content:space-between; align-items:center;">
                         <span style="font-size:13px; color:#666;"><i class="fas fa-info-circle"></i> 如果前台内容未更新，请尝试清理缓存</span>
@@ -356,7 +438,6 @@ require 'header.php';
                     <div class="fl-item" style="display:flex; gap:10px; margin-bottom:10px;">
                         <input type="text" name="fl_name[]" class="form-control" value="<?= htmlspecialchars($link['name']) ?>" placeholder="网站名称" style="flex:1">
                         <input type="text" name="fl_url[]" class="form-control" value="<?= htmlspecialchars($link['url']) ?>" placeholder="URL" style="flex:2">
-                        <!-- 修改为调用 JS 函数，更规范 -->
                         <button type="button" class="btn btn-danger-ghost" onclick="removeLink(this)" style="padding:0 10px;"><i class="fas fa-times"></i></button>
                     </div>
                     <?php endforeach; ?>
@@ -364,8 +445,68 @@ require 'header.php';
             </div>
         </div>
 
-        <!-- 5. 服务配置 -->
-        <div id="services" class="tab-content">
+       <div id="services" class="tab-content">
+            
+            <div class="section-card">
+                <h3 class="section-title">快捷登录模式与开关</h3>
+                <p class="section-desc">请选择通道模式，并按需开启或关闭指定的快捷登录平台。</p>
+                
+                <div class="form-group" style="margin-bottom: 25px;">
+                    <label class="form-label">API 接口通道模式</label>
+                    <select name="social_login_mode" id="socialLoginMode" class="form-control" onchange="toggleSocialLoginInputs()" style="border-color: #4f46e5; background: #f8fafc;">
+                        <option value="aggregated" <?= getVal('social_login_mode', 'aggregated')=='aggregated'?'selected':'' ?>>👉 第三方聚合登录 (如彩虹聚合，适合个人)</option>
+                        <option value="official" <?= getVal('social_login_mode')=='official'?'selected':'' ?>>👉 官方开放平台直连 (需企业认证资质)</option>
+                    </select>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px;">
+                    <label class="switch-label">
+                        <span style="font-size:14px; font-weight:500;"><i class="fab fa-weixin" style="color:#07c160; margin-right:5px; font-size:16px;"></i>微信登录</span>
+                        <div class="switch"><input type="checkbox" name="enable_login_wx" value="1" <?= getVal('enable_login_wx', '1')=='1'?'checked':'' ?>><span class="slider"></span></div>
+                    </label>
+                    <label class="switch-label">
+                        <span style="font-size:14px; font-weight:500;"><i class="fab fa-qq" style="color:#00a1d6; margin-right:5px; font-size:16px;"></i>QQ登录</span>
+                        <div class="switch"><input type="checkbox" name="enable_login_qq" value="1" <?= getVal('enable_login_qq', '1')=='1'?'checked':'' ?>><span class="slider"></span></div>
+                    </label>
+                    <label class="switch-label">
+                        <span style="font-size:14px; font-weight:500;"><i class="fab fa-tiktok" style="color:#1c1c1e; margin-right:5px; font-size:16px;"></i>抖音登录</span>
+                        <div class="switch"><input type="checkbox" name="enable_login_dy" value="1" <?= getVal('enable_login_dy', '1')=='1'?'checked':'' ?>><span class="slider"></span></div>
+                    </label>
+                </div>
+            </div>
+
+            <div id="social-config-aggregated" class="section-card social-config-block">
+                <h3 class="section-title">彩虹聚合登录配置</h3>
+                <div class="grid-2">
+                    <div class="form-group" style="grid-column: 1/-1"><label class="form-label">聚合登录接口地址</label><input type="text" name="social_login_url" class="form-control" value="<?= getVal('social_login_url', 'https://u.cccyun.cc') ?>"></div>
+                    <div class="form-group"><label class="form-label">AppID</label><input type="text" name="social_appid" class="form-control" value="<?= getVal('social_appid') ?>"></div>
+                    <div class="form-group"><label class="form-label">AppKey</label><input type="password" name="social_appkey" class="form-control" value="<?= getVal('social_appkey') ?>"></div>
+                </div>
+            </div>
+
+            <div id="social-config-official" class="section-card social-config-block" style="display:none;">
+                <h3 class="section-title">官方通道直连配置</h3>
+                <p class="section-desc" style="color:#ef4444;"><i class="fas fa-exclamation-circle"></i> 需分别前往各大官方开放平台申请应用。</p>
+                
+                <div class="grid-2" style="border-bottom: 1px dashed #e2e8f0; padding-bottom: 15px; margin-bottom: 15px;">
+                    <h4 style="grid-column: 1/-1; margin: 0; font-size: 14px; color: #07c160;"><i class="fab fa-weixin"></i> 微信开放平台</h4>
+                    <div class="form-group"><label class="form-label">AppID</label><input type="text" name="official_wx_appid" class="form-control" value="<?= getVal('official_wx_appid') ?>"></div>
+                    <div class="form-group"><label class="form-label">AppSecret</label><input type="password" name="official_wx_appsecret" class="form-control" value="<?= getVal('official_wx_appsecret') ?>"></div>
+                </div>
+                
+                <div class="grid-2" style="border-bottom: 1px dashed #e2e8f0; padding-bottom: 15px; margin-bottom: 15px;">
+                    <h4 style="grid-column: 1/-1; margin: 0; font-size: 14px; color: #00a1d6;"><i class="fab fa-qq"></i> QQ 互联</h4>
+                    <div class="form-group"><label class="form-label">App ID</label><input type="text" name="official_qq_appid" class="form-control" value="<?= getVal('official_qq_appid') ?>"></div>
+                    <div class="form-group"><label class="form-label">App Key</label><input type="password" name="official_qq_appkey" class="form-control" value="<?= getVal('official_qq_appkey') ?>"></div>
+                </div>
+
+                <div class="grid-2">
+                    <h4 style="grid-column: 1/-1; margin: 0; font-size: 14px; color: #1c1c1e;"><i class="fab fa-tiktok"></i> 抖音开放平台</h4>
+                    <div class="form-group"><label class="form-label">Client Key</label><input type="text" name="official_dy_clientkey" class="form-control" value="<?= getVal('official_dy_clientkey') ?>"></div>
+                    <div class="form-group"><label class="form-label">Client Secret</label><input type="password" name="official_dy_clientsecret" class="form-control" value="<?= getVal('official_dy_clientsecret') ?>"></div>
+                </div>
+            </div>
+            
             <div class="section-card">
                 <h3 class="section-title">SMTP 邮件发送</h3>
                 <div class="grid-2">
@@ -407,7 +548,6 @@ require 'header.php';
             </div>
         </div>
 
-        <!-- 6. 自定义代码 -->
         <div id="custom" class="tab-content">
             <div class="section-card">
                 <h3 class="section-title">自定义 CSS</h3>
@@ -421,17 +561,14 @@ require 'header.php';
     </form>
 </div>
 
-<!-- 移动端底部保存栏 -->
 <div class="mobile-save-bar">
     <button type="button" class="btn btn-primary" onclick="saveSettings(this)">
         <i class="fas fa-save"></i> 保存设置
     </button>
 </div>
 
-<!-- Toast 容器 -->
 <div id="toast" class="toast"><i class="fas fa-check-circle"></i> <span>保存成功</span></div>
 
-<!-- 引入单独的 JS 文件 -->
 <script src="assets/js/settings.js?v=<?= time() ?>"></script>
 
 <?php require 'footer.php';  ?>

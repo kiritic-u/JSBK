@@ -1,10 +1,6 @@
 -- phpMyAdmin SQL Dump
--- version 5.2.3
--- https://www.phpmyadmin.net/
---
--- 生成日期： 2026-02-25
--- 服务器版本： 5.7.44-log
--- PHP 版本： 8.2.28
+-- 系统版本： 1.1.1 (包含第三方登录与积分系统)
+-- 生成日期： 2026-03-14
 
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 START TRANSACTION;
@@ -14,10 +10,6 @@ SET time_zone = "+00:00";
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
 /*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
 /*!40101 SET NAMES utf8mb4 */;
-
---
--- 数据库： `bkcs`
---
 
 -- --------------------------------------------------------
 
@@ -53,7 +45,7 @@ CREATE TABLE `albums` (
 
 --
 -- 表的结构 `articles`
--- 核心修复：增加了 media_type, media_data, resource_data, password 字段
+-- 包含 1.1.1 新增的 view_points 字段
 --
 
 DROP TABLE IF EXISTS `articles`;
@@ -74,6 +66,7 @@ CREATE TABLE `articles` (
   `media_data` text COMMENT '多图URL数组 或 视频数据JSON',
   `resource_data` text COMMENT '存储资源名称和链接JSON',
   `password` varchar(255) DEFAULT NULL COMMENT '文章访问密码',
+  `view_points` int(11) NOT NULL DEFAULT '0' COMMENT '查看文章所需积分',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -109,7 +102,7 @@ CREATE TABLE `categories` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 --
--- 插入默认分类 (推荐保留一些基础分类，以免前台报错)
+-- 插入默认分类
 --
 
 INSERT INTO `categories` (`id`, `name`, `sort_order`, `is_hidden`) VALUES
@@ -223,6 +216,25 @@ CREATE TABLE `photos` (
 -- --------------------------------------------------------
 
 --
+-- 表的结构 `points_log`
+-- 1.1.1 新增积分日志表
+--
+
+DROP TABLE IF EXISTS `points_log`;
+CREATE TABLE `points_log` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `action` varchar(50) NOT NULL COMMENT '变动类型(例如: daily_login, admin_add)',
+  `points_change` int(11) NOT NULL COMMENT '变动数量(正数增加，负数扣除)',
+  `description` varchar(255) DEFAULT NULL COMMENT '详细说明',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户积分变动日志';
+
+-- --------------------------------------------------------
+
+--
 -- 表的结构 `settings`
 --
 
@@ -296,8 +308,7 @@ INSERT INTO `settings` (`key_name`, `value`) VALUES
 ('social_github', ''),
 ('social_twitter', ''),
 ('wechat_qrcode', ''),
--- [1.0.6 新增配置项起点]
-('db_version', '1.0.6'),
+('db_version', '1.1.1'),
 ('about_avatar_tags', '["全栈开发一条龙", "架构设计爱好者", "极客安全狂热粉", "疑难杂症清道夫", "细节强迫症晚期", "热爱开源与分享", "代码如诗行动派", "终身学习践行者"]'),
 ('about_motto_title', '源于<br>热爱而去创造'),
 ('about_motto_tag', '代码与设计'),
@@ -319,8 +330,15 @@ INSERT INTO `settings` (`key_name`, `value`) VALUES
 ('about_loc_job', 'UI设计 / 全栈开发'),
 ('about_journey_content', '<p>建立这个站点的初衷，是希望有一个属于自己的<strong>数字后花园</strong>。在这里，我可以不受限于各大平台的规则，自由地分享技术、沉淀思考、记录生活。</p><p>从前端 UI 的打磨，到后端 PHP + MySQL 的底层架构，再到 Redis 缓存优化与 WAF 安全机制的引入，开发 <strong>BKCS 系统</strong> 的每一行代码都是一次创造的乐趣。网络世界瞬息万变，希望这里能成为记录我个人成长轨迹的最安稳的港湾。</p><p>这也是我与世界沟通的桥梁，感谢你能访问这里，愿我们共同留下美好的记忆。</p>'),
 ('about_career_events', '[{"title":"某某理工大学","icon":"fa-graduation-cap","color":"bg-blue","left":"0","width":"42","top":"15","pos":"t-top"},{"title":"某互联网科技公司","icon":"fa-building","color":"bg-red","left":"38","width":"32","top":"45","pos":"t-bottom"},{"title":"独立开发 \\/ BKCS 系统","icon":"fa-rocket","color":"bg-red","left":"65","width":"35","top":"15","pos":"t-top"}]'),
-('about_career_axis', '[{"text":"2018","left":"0"},{"text":"2022","left":"38"},{"text":"2024","left":"65"},{"text":"现在","left":"100"}]');
--- [1.0.6 新增配置项终点]
+('about_career_axis', '[{"text":"2018","left":"0"},{"text":"2022","left":"38"},{"text":"2024","left":"65"},{"text":"现在","left":"100"}]'),
+('enable_login_qq', '1'),
+('enable_login_wx', '1'),
+('enable_login_dy', '1'),
+('social_login_mode', 'aggregated'),
+('social_login_url', 'http://pt.jx1314.cc/'),
+('social_appid', '1000'),
+('social_appkey', 'c1cc5f2fd44d04e1c2eafa7267549ad6'),
+('user_levels_config', '[{"level":1,"points":0,"name":"青铜会员"},{"level":2,"points":100,"name":"白银会员"},{"level":3,"points":500,"name":"黄金会员"},{"level":4,"points":1500,"name":"钻石会员"},{"level":5,"points":5000,"name":"星耀会员"}]');
 
 -- --------------------------------------------------------
 
@@ -341,6 +359,7 @@ CREATE TABLE `tags` (
 
 --
 -- 表的结构 `users`
+-- 包含 1.1.1 新增的第三方UID及积分等级字段
 --
 
 DROP TABLE IF EXISTS `users`;
@@ -353,8 +372,16 @@ CREATE TABLE `users` (
   `avatar` varchar(255) DEFAULT 'https://ui-avatars.com/api/?background=random&name=User',
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
   `is_banned` tinyint(1) DEFAULT '0' COMMENT '0正常 1封禁',
+  `points` int(11) NOT NULL DEFAULT '0' COMMENT '用户当前积分',
+  `level` int(11) NOT NULL DEFAULT '1' COMMENT '用户当前等级',
+  `qq_uid` varchar(100) DEFAULT NULL COMMENT 'QQ登录UID',
+  `wx_uid` varchar(100) DEFAULT NULL COMMENT '微信登录UID',
+  `douyin_uid` varchar(100) DEFAULT NULL COMMENT '抖音登录UID',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `email` (`email`)
+  UNIQUE KEY `email` (`email`),
+  UNIQUE KEY `idx_qq_uid` (`qq_uid`),
+  UNIQUE KEY `idx_wx_uid` (`wx_uid`),
+  UNIQUE KEY `idx_douyin_uid` (`douyin_uid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 COMMIT;

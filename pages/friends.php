@@ -139,7 +139,7 @@ if ($total > 0) {
 }
 ?>
 
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+<link href="https://fonts.loli.net/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/pages/assets/css/friends.css?v=<?php echo time(); ?>">
 
 <div class="friends-page-body">

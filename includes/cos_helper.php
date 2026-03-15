@@ -1,25 +1,14 @@
 <?php
 /**
- * includes/cos_helper.php - 腾讯云 COS 轻量级上传工具
+ * includes/cos_helper.php - 腾讯云 COS 轻量级上传工具 (安全防泄漏版)
  */
-/**
-                _ _                     ____  _                             
-               | (_) __ _ _ __   __ _  / ___|| |__  _   _  ___              
-            _  | | |/ _` | '_ \ / _` | \___ \| '_ \| | | |/ _ \             
-           | |_| | | (_| | | | | (_| |  ___) | | | | |_| | (_) |            
-            \___/|_|\__,_|_| |_|\__, | |____/|_| |_|\__,_|\___/             
-   ____   _____          _  __  |___/   _____   _   _  _          ____ ____ 
-  / ___| |__  /         | | \ \/ / / | |___ /  / | | || |        / ___/ ___|
- | |  _    / /       _  | |  \  /  | |   |_ \  | | | || |_      | |  | |    
- | |_| |  / /_   _  | |_| |  /  \  | |  ___) | | | |__   _|  _  | |__| |___ 
-  \____| /____| (_)  \___/  /_/\_\ |_| |____/  |_|    |_|   (_)  \____\____|
-                                                                            
-                               追求极致的美学                               
-**/
+
 function uploadToCOS($localFile, $targetPath) {
+    if (!file_exists($localFile)) return false;
+
     $pdo = getDB();
     
-    // 从数据库读取配置
+    // 性能优化提示：这里最好也用 Cache::get('cos_config') 包裹起来，避免每次上传都查库！
     $stmt = $pdo->query("SELECT key_name, value FROM settings WHERE key_name LIKE 'cos_%'");
     $conf = [];
     while($r = $stmt->fetch()) $conf[$r['key_name']] = $r['value'];
@@ -32,11 +21,13 @@ function uploadToCOS($localFile, $targetPath) {
 
     if (!$secretId || !$secretKey || !$bucket || !$region) return false;
 
-    // 整理域名
     $host = "{$bucket}.cos.{$region}.myqcloud.com";
     $url  = "https://{$host}/" . ltrim($targetPath, '/');
     
-    // 生成签名 (简单版用于 PUT 上传)
+    // 【修复1】动态获取文件的真实 MIME 类型
+    $mimeType = mime_content_type($localFile) ?: 'application/octet-stream';
+    
+    // 签名逻辑保持不变...
     $httpMethod = "put";
     $httpUri = "/" . ltrim($targetPath, '/');
     $timestamp = time();
@@ -50,22 +41,36 @@ function uploadToCOS($localFile, $targetPath) {
     
     $authorization = "q-sign-algorithm=sha1&q-ak={$secretId}&q-sign-time={$keyTime}&q-key-time={$keyTime}&q-header-list=&q-url-param-list=&q-signature={$signature}";
 
-    // 使用 CURL 发送 PUT 请求
+    // 【修复2】规范化文件句柄
+    $fileStream = fopen($localFile, 'rb');
+
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_PUT, true);
-    curl_setopt($ch, CURLOPT_INFILE, fopen($localFile, 'rb'));
+    curl_setopt($ch, CURLOPT_INFILE, $fileStream);
     curl_setopt($ch, CURLOPT_INFILESIZE, filesize($localFile));
-    curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: {$authorization}"]);
+    
+    // 【修复3】加入 Content-Type，确保浏览器能正确渲染图片/视频
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        "Authorization: {$authorization}",
+        "Content-Type: {$mimeType}"
+    ]);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    
+    // 【修复4】强制开启 SSL 校验，防止中间人窃取密钥！
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true); 
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
     
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
+    
+    // 【修复5】释放资源，防止内存和句柄溢出
+    if (is_resource($fileStream)) {
+        fclose($fileStream);
+    }
 
     if ($httpCode == 200) {
-        // 如果有自定义域名，返回自定义域名的链接
         if ($domain) {
             return rtrim($domain, '/') . "/" . ltrim($targetPath, '/');
         }
@@ -74,3 +79,4 @@ function uploadToCOS($localFile, $targetPath) {
     
     return false;
 }
+?>

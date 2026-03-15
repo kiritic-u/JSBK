@@ -2,7 +2,7 @@
  * ====================================================================
  * 项目名称：Settings Script
  * 文件名称：settings.js
- *  * @author:      jiang shuo
+ * @author:      jiang shuo
  * @update:      2026-1-1
  * 描述：后台设置页面的交互逻辑（Tab切换、表单提交、动态元素等）
  * ====================================================================
@@ -42,10 +42,30 @@ function toggleBgInputs() {
     document.querySelectorAll('.bg-option').forEach(el => el.style.display = 'none');
     
     // 显示选中的类型
-    // 注意：CSS Grid 布局仅用于 gradient，其他用 block
     const targetEl = document.getElementById('bg-' + type);
     if(targetEl) {
         targetEl.style.display = (type === 'gradient') ? 'grid' : 'block';
+    }
+}
+
+/**
+ * [新增] 切换聚合登录/官方登录的配置面板
+ */
+function toggleSocialLoginInputs() {
+    const modeSelect = document.getElementById('socialLoginMode');
+    if (!modeSelect) return;
+    
+    const mode = modeSelect.value;
+    
+    // 隐藏所有面板
+    document.querySelectorAll('.social-config-block').forEach(el => el.style.display = 'none');
+    
+    // 显示对应的面板
+    const targetEl = document.getElementById('social-config-' + mode);
+    if(targetEl) {
+        targetEl.style.display = 'block';
+        // 加点简单动画
+        targetEl.style.animation = 'fadeIn 0.3s';
     }
 }
 
@@ -76,6 +96,43 @@ function addLink() {
 function removeLink(btn) {
     if(confirm('确定删除此链接吗？')) {
         btn.parentElement.remove();
+    }
+}
+
+/**
+ * 动态添加用户等级输入行
+ */
+function addLevel() {
+    const container = document.getElementById('levels-container');
+    if (!container) return;
+
+    const div = document.createElement('div');
+    div.className = 'level-item';
+    div.style.cssText = 'display:flex; gap:10px; margin-bottom:10px; align-items: center; animation: fadeIn 0.3s;';
+    
+    div.innerHTML = `
+        <div class="form-group" style="margin-bottom:0; flex:1">
+            <input type="number" name="level_num[]" class="form-control" placeholder="例: 1" required>
+        </div>
+        <div class="form-group" style="margin-bottom:0; flex:1">
+            <input type="number" name="level_points[]" class="form-control" placeholder="例: 100" required>
+        </div>
+        <div class="form-group" style="margin-bottom:0; flex:2">
+            <input type="text" name="level_name[]" class="form-control" placeholder="例: 头衔" required>
+        </div>
+        <div>
+            <button type="button" class="btn btn-danger-ghost" onclick="removeLevel(this)" style="padding:0 10px; height: 38px;"><i class="fas fa-times"></i></button>
+        </div>
+    `;
+    container.appendChild(div);
+}
+
+/**
+ * 删除用户等级行
+ */
+function removeLevel(btn) {
+    if(confirm('确定删除此等级配置吗？')) {
+        btn.closest('.level-item').remove();
     }
 }
 
@@ -119,7 +176,7 @@ function saveSettings(btn) {
 }
 
 /**
- * [新增] AJAX 清空 Redis 缓存
+ * AJAX 清空 Redis 缓存
  */
 function clearCache(btn) {
     if (!confirm('确定要清空所有 Redis 缓存吗？')) return;
@@ -176,6 +233,7 @@ function showToast(msg, type) {
 // ================= 初始化事件监听 =================
 document.addEventListener('DOMContentLoaded', function() {
     toggleBgInputs();
+    toggleSocialLoginInputs(); // <--- 这里调用了新增的切换逻辑
 
     const picker = document.getElementById('bgPicker');
     const text = document.getElementById('bgText');

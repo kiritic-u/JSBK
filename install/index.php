@@ -207,12 +207,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute([$siteName]);
             } catch (Exception $e) { }
 
-            // 生成 config.php 
+            // =========================================================
+            // 生成 最新版、高性能防劫持的 config.php 
+            // =========================================================
             $configTpl = <<<'PHP'
 <?php
 // includes/config.php
-error_reporting(E_ALL); 
-ini_set('display_errors', 0);
+/**
+ * 系统核心配置文件 (高性能 / 高安全版)
+ */
+
+// --- 0. 环境变量与报错控制 ---
+define('APP_ENV', 'production'); 
+define('APP_VERSION', '1.0.7'); 
+
+if (APP_ENV === 'development') {
+    error_reporting(E_ALL); 
+    ini_set('display_errors', 1);
+} else {
+    error_reporting(0); 
+    ini_set('display_errors', 0);
+}
+
+// --- Session 强化 ---
+// 【核心防御】：强行重置为本地文件存储与系统默认临时目录，防止环境劫持
+ini_set('session.save_handler', 'files'); 
+ini_set('session.save_path', sys_get_temp_dir());
 
 if (session_status() === PHP_SESSION_NONE) {
     session_set_cookie_params([
@@ -226,9 +246,6 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// --- 0. 系统版本配置 ---
-define('APP_VERSION', '1.0.0');
-
 // --- 1. 数据库配置 ---
 define('DB_HOST', '__DB_HOST__');
 define('DB_NAME', '__DB_NAME__');
@@ -236,53 +253,41 @@ define('DB_USER', '__DB_USER__');
 define('DB_PASS', '__DB_PASS__');
 define('DB_CHARSET', 'utf8mb4');
 
-// --- 1.5 Redis 配置 ---
+// --- 2. Redis 配置 (性能开关) ---
+define('REDIS_ENABLED', false); // 刚安装默认关闭，请到后台设置中开启
 define('REDIS_HOST', '__REDIS_HOST__');
 define('REDIS_PORT', __REDIS_PORT__);
 define('REDIS_PASS', '__REDIS_PASS__'); 
 define('REDIS_DB', 0);
 define('CACHE_PREFIX', 'bkcs:');
 
-// --- 获取 Redis 连接 ---
+// --- 3. 获取 Redis 连接 (零开销版) ---
 function getRedis() {
     static $redis = null;
-    static $is_checked = false;
+    
+    // 如果常量关闭，或者类不存在，直接返回，绝对不查库！
+    if (!REDIS_ENABLED || !class_exists('Redis')) {
+        return null;
+    }
 
-    if ($redis === null && !$is_checked) {
-        $is_checked = true; 
-
-        if (!class_exists('Redis')) {
-            return null;
-        }
-
-        try {
-            $pdo = getDB();
-            $stmt = $pdo->query("SELECT value FROM settings WHERE key_name = 'redis_enabled'");
-            $res = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            if (!$res || $res['value'] !== '1') {
-                return null;
-            }
-        } catch (Exception $e) {
-            return null; 
-        }
-
+    if ($redis === null) {
         try {
             $redis_conn = new Redis();
-            $redis_conn->connect(REDIS_HOST, REDIS_PORT);
+            $redis_conn->pconnect(REDIS_HOST, REDIS_PORT);
             if (REDIS_PASS) {
                 $redis_conn->auth(REDIS_PASS);
             }
             $redis_conn->select(REDIS_DB);
             $redis = $redis_conn;
         } catch (Exception $e) {
-            return null;
+            error_log("Redis Connection Error: " . $e->getMessage());
+            return null; 
         }
     }
     return $redis;
 }
 
-// --- 3. 获取数据库连接 ---
+// --- 4. 获取数据库连接 ---
 function getDB() {
     static $pdo = null;
     if ($pdo === null) {
@@ -296,18 +301,18 @@ function getDB() {
             $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
         } catch (\PDOException $e) {
             error_log("Database Connection Error: " . $e->getMessage());
-            die(json_encode(['error' => '数据库连接失败'])); 
+            die(json_encode(['error' => '数据库连接失败，系统维护中。'])); 
         }
     }
     return $pdo;
 }
 
-// --- 4. 辅助函数 ---
+// --- 5. 辅助函数 ---
 function h($string) {
     return htmlspecialchars($string ?? '', ENT_QUOTES, 'UTF-8');
 }
 
-// --- 5. 权限检查函数 ---
+// --- 6. 权限检查函数 ---
 function requireLogin() {
     if (empty($_SESSION['admin_logged_in'])) {
         header('Location: ../admin-login'); 
@@ -320,44 +325,67 @@ function requireUserLogin() {
         header('Location: login.php');
         exit;
     }
-    $pdo = getDB();
-    try {
-        $stmt = $pdo->prepare("SELECT is_banned FROM users WHERE id = ?");
-        $stmt->execute([$_SESSION['user_id']]);
-        $user = $stmt->fetch();
-        if (!$user || $user['is_banned'] == 1) {
-            session_destroy();
-            if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'msg' => '账号已被封禁']);
-                exit;
-            }
-            echo "<script>alert('您的账号已被封禁或不存在');window.location.href='login.php';</script>";
-            exit;
-        }
-    } catch (Exception $e) {}
 }
 
-// --- 6. 全局状态自动检查 ---
+// --- 7. 全局状态自动检查 (高性能缓存版) ---
 if (isset($_SESSION['user_id'])) {
-    try {
-        $pdo_check = getDB();
-        $stmt_check = $pdo_check->prepare("SELECT is_banned FROM users WHERE id = ?");
-        $stmt_check->execute([$_SESSION['user_id']]);
-        $u_check = $stmt_check->fetch();
+    $userId = $_SESSION['user_id'];
+    $isBanned = false;
+    $redis = getRedis();
 
-        if (!$u_check || (isset($u_check['is_banned']) && $u_check['is_banned'] == 1)) {
-            $_SESSION = [];
-            if (ini_get("session.use_cookies")) {
-                $params = session_get_cookie_params();
-                setcookie(session_name(), '', time() - 42000,
-                    $params["path"], $params["domain"],
-                    $params["secure"], $params["httponly"]
-                );
-            }
-            session_destroy();
+    if ($redis) {
+        // 尝试从 Redis 读取用户封禁状态
+        $banCacheKey = CACHE_PREFIX . 'user_banned:' . $userId;
+        $cachedStatus = $redis->get($banCacheKey);
+        
+        if ($cachedStatus !== false) {
+            $isBanned = ($cachedStatus === '1');
+        } else {
+            // Redis 没有缓存，才去查 MySQL
+            $pdo_check = getDB();
+            $stmt_check = $pdo_check->prepare("SELECT is_banned FROM users WHERE id = ?");
+            $stmt_check->execute([$userId]);
+            $u_check = $stmt_check->fetch();
+            $isBanned = ($u_check && $u_check['is_banned'] == 1);
+            
+            // 将结果写入 Redis，缓存 5 分钟
+            $redis->setex($banCacheKey, 300, $isBanned ? '1' : '0');
         }
-    } catch (Exception $e) {}
+    } else {
+        // 降级：如果没开 Redis，就用 Session 控制刷新频率（例如每 60 秒查一次）
+        if (empty($_SESSION['last_ban_check_time']) || time() - $_SESSION['last_ban_check_time'] > 60) {
+            $pdo_check = getDB();
+            $stmt_check = $pdo_check->prepare("SELECT is_banned FROM users WHERE id = ?");
+            $stmt_check->execute([$userId]);
+            $u_check = $stmt_check->fetch();
+            $isBanned = ($u_check && $u_check['is_banned'] == 1);
+            $_SESSION['last_ban_check_time'] = time();
+            $_SESSION['is_banned_cached'] = $isBanned;
+        } else {
+            $isBanned = $_SESSION['is_banned_cached'] ?? false;
+        }
+    }
+
+    // 执行封禁逻辑
+    if ($isBanned) {
+        $_SESSION = [];
+        if (ini_get("session.use_cookies")) {
+            $params = session_get_cookie_params();
+            setcookie(session_name(), '', time() - 42000,
+                $params["path"], $params["domain"],
+                $params["secure"], $params["httponly"]
+            );
+        }
+        session_destroy();
+        
+        if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'msg' => '账号已被封禁']);
+            exit;
+        }
+        echo "<script>alert('您的账号已被封禁或不存在');window.location.href='login.php';</script>";
+        exit;
+    }
 }
 ?>
 PHP;
@@ -462,7 +490,7 @@ PHP;
         .header p { color: var(--text-sub); font-size: 14px; margin-top: 8px; }
 
         .form-group { margin-bottom: 20px; }
-        label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 8px; color: var(--text-sub); }
+        .label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 8px; color: var(--text-sub); }
         input[type="text"], input[type="password"] {
             width: 100%; padding: 12px 16px; background: rgba(255,255,255,0.5);
             border: 1px solid var(--border); border-radius: 12px; font-size: 15px;

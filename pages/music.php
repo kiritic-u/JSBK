@@ -1,133 +1,78 @@
 <?php
 // pages/music.php
-/**
-                _ _                     ____  _                             
-               | (_) __ _ _ __   __ _  / ___|| |__  _   _  ___              
-            _  | | |/ _` | '_ \ / _` | \___ \| '_ \| | | |/ _ \             
-           | |_| | | (_| | | | | (_| |  ___) | | | | |_| | (_) |            
-            \___/|_|\__,_|_| |_|\__, | |____/|_| |_|\__,_|\___/             
-   ____   _____          _  __  |___/   _____   _   _  _          ____ ____ 
-  / ___| |__  /         | | \ \/ / / | |___ /  / | | || |        / ___/ ___|
- | |  _    / /       _  | |  \  /  | |   |_ \  | | | || |_      | |  | |    
- | |_| |  / /_   _  | |_| |  /  \  | |  ___) | | | |__   _|  _  | |__| |___ 
-  \____| /____| (_)  \___/  /_/\_\ |_| |____/  |_|    |_|   (_)  \____\____|
-                                                                            
-                               追求极致的美学                               
-**/
-// 1. 基础配置加载
-require_once 'includes/config.php';
-$pdo = getDB();
-$redis = getRedis(); 
 
-define('SITE_CONFIG_CACHE_KEY', CACHE_PREFIX . 'settings:all');
+// 1. 直接引入全局 Header（内含数据库连接、配置加载、顶部导航、侧边栏和登录弹窗）
+// 注意：按你的代码注释推测目录可能是 includes，如果是 includer 请自行修改为 /../includer/header.php
+require_once __DIR__ . '/../includes/header.php';
 
-// 2. 全局配置函数
-if (!function_exists('conf')) {
-    $site_config = null; 
-
-    function conf($key, $default = '') {
-        global $site_config, $pdo, $redis;
-        if ($site_config === null) {
-            $site_config = []; 
-            if ($redis) {
-                $cachedConfig = $redis->get(SITE_CONFIG_CACHE_KEY);
-                if ($cachedConfig) {
-                    $site_config = json_decode($cachedConfig, true);
-                }
-            }
-            if (empty($site_config)) {
-                $stmt = $pdo->query("SELECT key_name, value FROM settings");
-                $db_config = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
-                if ($db_config) { $site_config = $db_config; }
-                if ($redis) { $redis->set(SITE_CONFIG_CACHE_KEY, json_encode($site_config), 86400); }
-            }
-        }
-        return isset($site_config[$key]) && $site_config[$key] !== '' ? htmlspecialchars($site_config[$key]) : $default;
-    }
-}
-
-// 3. 状态定义
-$is_home = false; $is_album = false; $is_music = true;
-$is_user_login = isset($_SESSION['user_id']);
-$current_user_avatar = $_SESSION['avatar'] ?? '';
-$current_user_name = $_SESSION['nickname'] ?? '';
-$enable_chatroom = conf('enable_chatroom') == '1';
-
-// 配置读取
+// 2. 读取音乐 API 配置 (conf 函数在 header.php 中已定义)
 $api_url = conf('music_api_url', 'https://yy.jx1314.cc');
 $playlist_id = conf('music_playlist_id', '884870906');
 ?>
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>音乐馆 - <?= conf('site_name') ?></title>
-    <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;700&display=swap" rel="stylesheet">
-    
-    <link rel="stylesheet" href="/pages/assets/css/music-player.css?v=<?= time() ?>">
-</head>
-<body>
 
-<div class="mobile-menu-overlay" id="mobileOverlay"></div>
-
-<div class="mobile-sidebar" id="mobileSidebar">
-    <div class="m-header">
-        <div class="m-user-info">
-            <img src="<?= $is_user_login ? htmlspecialchars($current_user_avatar) : conf('author_avatar') ?>" class="m-avatar" alt="Avatar">
-            <div>
-                <div class="m-username"><?= $is_user_login ? htmlspecialchars($current_user_name) : conf('author_name') ?></div>
-                <div class="m-bio"><?= $is_user_login ? '欢迎回来' : '游客访问' ?></div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="m-nav-list">
-        <a href="/" class="m-nav-item"><i class="fa-solid fa-house"></i> 首页</a>
-        <a href="/album" class="m-nav-item"><i class="fa-regular fa-images"></i> 视觉画廊</a>
-        <a href="/music" class="m-nav-item active"><i class="fa-solid fa-music"></i> 音乐馆</a>
-        <a href="/love" class="m-nav-item"><i class="fa-solid fa-heart"></i> Love</a>
-        <a href="/friends" class="m-nav-item"><i class="fa-solid fa-link"></i> 友情链接</a>
-        <?php if($enable_chatroom): ?>
-            <a href="/chat" class="m-nav-item"><i class="fa-regular fa-comments"></i> 在线聊天室</a>
-        <?php endif; ?>
-    </div>
-    
-    <div class="m-footer">
-        <?php if($is_user_login): ?>
-            <a href="user/dashboard.php" class="m-btn"><i class="fa-solid fa-user-gear"></i> 个人中心</a>
-            <a href="user/logout.php" class="m-btn"><i class="fa-solid fa-power-off"></i> 退出</a>
-        <?php else: ?>
-            <a href="javascript:;" onclick="openAuthModal('login'); toggleMenu();" class="m-btn"><i class="fa-solid fa-right-to-bracket"></i> 登录/注册</a>
-        <?php endif; ?>
-    </div>
 </div>
 
-<nav class="navbar-wrapper" id="mainNav">
-    <div class="navbar-inner">
-        <a href="/" class="logo"><?= conf('site_name', 'BLOG.') ?></a>
-        <ul class="nav-links">
-            <li><a href="/"><i class="fa-solid fa-house"></i> 首页</a></li>
-            <li><a href="/album"><i class="fa-regular fa-images"></i> 相册</a></li>
-            <a href="/music" class="active"><i class="fa-solid fa-music"></i> 音乐馆</a>
-            <li><a href="/love"><i class="fa-solid fa-heart"></i> Love</a></li>
-            <li><a href="/friends"><i class="fa-solid fa-link"></i> 友链</a></li>
-        </ul>
-        <div class="nav-right">
-            <div class="search-box">
-                <i class="fa-solid fa-magnifying-glass"></i>
-                <input type="text" placeholder="Search..." disabled title="音乐馆内暂不支持搜索">
-            </div>
-            <?php if($is_user_login): ?>
-                <a href="user/dashboard.php" class="nav-user-btn"><img src="<?= htmlspecialchars($current_user_avatar) ?>" class="nav-avatar"></a>
-            <?php else: ?>
-                <a href="javascript:;" onclick="openAuthModal('login')" class="nav-login-link">登录 / 注册</a>
-            <?php endif; ?>
-            <div class="nav-menu-btn" id="menuBtn"><i class="fa-solid fa-bars-staggered"></i></div>
-        </div>
-    </div>
-</nav>
+<link href="https://fonts.loli.net/css2?family=Outfit:wght@300;400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/pages/assets/css/music-player.css?v=<?= time() ?>">
+
+<style>
+    /* 重置 body 布局，覆盖 header.php 里的 padding 和默认背景 */
+    body {
+        height: 100vh !important;
+        height: 100dvh !important;
+        overflow: hidden !important;
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        background: #121212 !important; 
+        color: #fff !important;
+        padding-top: 0 !important;
+        background-image: none !important;
+    }
+
+    /* 👇 新增：隐藏 header.php 结尾那个占位的空 container，防止它把播放器挤到右边 */
+    body > .container {
+        display: none !important;
+    }
+
+    /* 强制重写顶部导航栏为深色透明质感 */
+    .navbar-wrapper {
+        background: rgba(0, 0, 0, 0.3) !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+    }
+    .logo, .nav-menu-btn { color: #fff !important; }
+    .nav-links li a { color: rgba(255, 255, 255, 0.6) !important; }
+    .nav-links li a:hover, .nav-links li a.active { color: #fff !important; }
+    .nav-links li a::after { background: #fff !important; }
+    
+    /* 强制深色搜索框 */
+    .search-box input {
+        background: rgba(255, 255, 255, 0.1) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        color: #fff !important;
+    }
+    .search-box i { color: rgba(255, 255, 255, 0.5) !important; }
+    
+    /* 强制深色登录/注册按钮 */
+    .nav-login-link {
+        color: #fff !important;
+        border-color: rgba(255, 255, 255, 0.3) !important;
+        background: rgba(255, 255, 255, 0.05) !important;
+    }
+    .nav-login-link:hover {
+        background: #fff !important;
+        color: #000 !important;
+    }
+
+    /* 强制重写移动端侧滑菜单为深色模式 */
+    .mobile-sidebar { background: rgba(26, 26, 26, 0.95) !important; color: #fff !important; }
+    .m-username { color: #fff !important; }
+    .m-nav-item { color: rgba(255, 255, 255, 0.7) !important; }
+    .m-nav-item:hover, .m-nav-item.active { background: rgba(255, 255, 255, 0.1) !important; color: #fff !important; }
+    .m-header, .m-footer { border-color: rgba(255, 255, 255, 0.1) !important; }
+    .m-btn { border-color: rgba(255, 255, 255, 0.2) !important; color: #ccc !important; }
+    .m-btn:hover { background: #fff !important; color: #000 !important; border-color: #fff !important; }
+</style>
 
 <div class="bg-layer" id="bg-layer"></div>
 
@@ -172,12 +117,11 @@ $playlist_id = conf('music_playlist_id', '884870906');
 
 <audio id="audio-player"></audio>
 
-<?php require_once __DIR__ . '/../includes/auth_modal.php'; ?>
-
 <script>
-    const PLAYLIST_ID = '<?= $playlist_id ?>';
+    const PLAYLIST_ID = '<?= htmlspecialchars($playlist_id) ?>';
 </script>
 
 <script src="/pages/assets/js/music-player.js?v=<?= time() ?>"></script>
+
 </body>
 </html>

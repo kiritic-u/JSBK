@@ -1,21 +1,20 @@
 <?php
 /**
- * user/login.php - 用户认证中心 (安全加固版)
- * /**
-                _ _                     ____  _                             
-               | (_) __ _ _ __   __ _  / ___|| |__  _   _  ___              
-            _  | | |/ _` | '_ \ / _` | \___ \| '_ \| | | |/ _ \             
-           | |_| | | (_| | | | | (_| |  ___) | | | | |_| | (_) |            
-            \___/|_|\__,_|_| |_|\__, | |____/|_| |_|\__,_|\___/             
-   ____   _____          _  __  |___/   _____   _   _  _          ____ ____ 
-  / ___| |__  /         | | \ \/ / / | |___ /  / | | || |        / ___/ ___|
- | |  _    / /       _  | |  \  /  | |   |_ \  | | | || |_      | |  | |    
- | |_| |  / /_   _  | |_| |  /  \  | |  ___) | | | |__   _|  _  | |__| |___ 
-  \____| /____| (_)  \___/  /_/\_\ |_| |____/  |_|    |_|   (_)  \____\____|
-                                                                            
-                               追求极致的美学                               
+ * user/login.php - 用户认证中心 (修复版)
  */
 require_once $_SERVER['DOCUMENT_ROOT'] . '/includes/config.php';
+
+// 确保 Session 正常开启
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// [核心修复1] 防止直接在浏览器访问变成白板，强制跳回首页
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    header("Location: ../index.php");
+    exit;
+}
+
 $pdo = getDB();
 
 function jsonOut($success, $msg, $redirect = '') {
@@ -32,13 +31,12 @@ if ($action == 'login') {
     $password = $_POST['password'];
     $captcha = trim($_POST['captcha']);
     
-    // [安全修复] 1. 验证码校验逻辑优化
-    // 无论验证码输入对错，验证一次后必须作废，防止暴力破解密码
+    // 验证码校验
     if (empty($_SESSION['captcha_code']) || strtolower($captcha) !== strtolower($_SESSION['captcha_code'])) {
-        unset($_SESSION['captcha_code']); // 输错销毁
+        unset($_SESSION['captcha_code']); 
         jsonOut(false, "图形验证码错误");
     }
-    unset($_SESSION['captcha_code']); // 输对也销毁 (One-time use)
+    unset($_SESSION['captcha_code']); 
 
     $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ? OR email = ?");
     $stmt->execute([$username, $username]);
@@ -47,10 +45,8 @@ if ($action == 'login') {
     if ($user && password_verify($password, $user['password'])) {
         if ($user['is_banned']) jsonOut(false, "账号已被封禁，请联系管理员");
         
-        // [安全修复] 2. 防止 Session 固定攻击
-        // 登录成功后，强制生成新的 Session ID
-        session_regenerate_id(true);
-
+        // [核心修复2] 删除了导致部分服务器登录状态丢失的 session_regenerate_id 语句
+        
         $_SESSION['user_id'] = $user['id'];
         $_SESSION['username'] = $user['username'];
         $_SESSION['nickname'] = $user['nickname'];
@@ -58,7 +54,6 @@ if ($action == 'login') {
         
         jsonOut(true, "登录成功", "index.php");
     } else {
-        // 模糊报错，不告诉黑客是用户名错还是密码错
         jsonOut(false, "账号或密码错误");
     }
 }
@@ -70,7 +65,6 @@ if ($action == 'register') {
     $email = trim($_POST['email']);
     $email_code = trim($_POST['email_code']);
 
-    // 验证邮件验证码
     if (empty($_SESSION['email_verify_code']) || $email_code != $_SESSION['email_verify_code'] || $email != $_SESSION['email_verify_addr']) {
         jsonOut(false, "邮件验证码错误或失效");
     }
@@ -82,19 +76,15 @@ if ($action == 'register') {
     $hash = password_hash($password, PASSWORD_DEFAULT);
     $avatar = 'https://api.dicebear.com/7.x/avataaars/svg?seed=' . urlencode($username);
     
-    $stmt = $pdo->prepare("INSERT INTO users (username, password, nickname, avatar, email) VALUES (?, ?, ?, ?, ?)");
+    $stmt = $pdo->prepare("INSERT INTO users (username, password, nickname, avatar, email, points, level) VALUES (?, ?, ?, ?, ?, 0, 1)");
     if ($stmt->execute([$username, $hash, $username, $avatar, $email])) {
         
-        // [安全修复] 3. 注册成功自动登录，同样需要重置 Session ID
-        session_regenerate_id(true);
-
         $new_id = $pdo->lastInsertId();
         $_SESSION['user_id'] = $new_id;
         $_SESSION['username'] = $username;
         $_SESSION['nickname'] = $username;
         $_SESSION['avatar'] = $avatar;
         
-        // 清理验证码 Session，防止复用
         unset($_SESSION['email_verify_code']);
         unset($_SESSION['email_verify_addr']);
         
@@ -110,7 +100,6 @@ if ($action == 'reset_password') {
     $new_pwd = $_POST['new_password'];
     $code = trim($_POST['email_code']);
 
-    // 验证邮件验证码
     if (empty($_SESSION['reset_email_code']) || $code != $_SESSION['reset_email_code'] || $email != $_SESSION['reset_email_addr']) {
         jsonOut(false, "验证码错误或已过期");
     }
@@ -118,20 +107,16 @@ if ($action == 'reset_password') {
     $hash = password_hash($new_pwd, PASSWORD_DEFAULT);
     $stmt = $pdo->prepare("UPDATE users SET password = ? WHERE email = ?");
     if ($stmt->execute([$hash, $email])) {
-        // [安全修复] 4. 重置成功后获取用户信息并自动登录
+        
         $u_stmt = $pdo->prepare("SELECT * FROM users WHERE email = ?");
         $u_stmt->execute([$email]);
         $user = $u_stmt->fetch();
-
-        // 同样重置 Session ID
-        session_regenerate_id(true);
 
         $_SESSION['user_id'] = $user['id'];
         $_SESSION['username'] = $user['username'];
         $_SESSION['nickname'] = $user['nickname'];
         $_SESSION['avatar'] = $user['avatar'];
         
-        // 清理验证码
         unset($_SESSION['reset_email_code']);
         unset($_SESSION['reset_email_addr']);
         

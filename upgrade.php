@@ -4,7 +4,6 @@
  * 运行环境：由 admin/updater.php 在解压后自动 require 执行
  */
 
-// 获取 PDO 对象 (updater.php 已经引入了 config.php)
 $pdo = getDB();
 
 // 1. 获取用户当前的数据库版本
@@ -12,18 +11,14 @@ try {
     $stmt = $pdo->query("SELECT value FROM settings WHERE key_name = 'db_version'");
     $current_db_version = $stmt->fetchColumn();
 } catch (Exception $e) {
-    $current_db_version = false; // 如果连 settings 表或这个键都没有，返回 false
+    $current_db_version = false; 
 }
 
-// 2. 如果没有记录版本，说明他是 1.0.6 之前的旧版老用户，我们强行标记他为 1.0.5
+
 if (!$current_db_version) {
     $current_db_version = '1.0.5';
     $pdo->exec("INSERT IGNORE INTO settings (key_name, value) VALUES ('db_version', '1.0.5')");
 }
-
-// =============================================================================
-// 流水线式升级区块：根据版本号，缺哪补哪！绝对不会重复执行报错！
-// =============================================================================
 
 // 【目标版本 1.0.6】：补齐密码字段、资源字段、以及关于页面的默认配置
 if (version_compare($current_db_version, '1.0.6', '<')) {
@@ -75,12 +70,127 @@ if (version_compare($current_db_version, '1.0.6', '<')) {
     $current_db_version = '1.0.6'; // 传递给下一个可能的 if 区块
 }
 
-// -----------------------------------------------------------------------------
-// 未来如果你发布 1.0.7 版本，只需要在下面继续加一个 if 区块即可：
-// if (version_compare($current_db_version, '1.0.7', '<')) { 
-//     $pdo->exec("ALTER TABLE ..."); 
-//     $pdo->exec("UPDATE settings SET value = '1.0.7' WHERE key_name = 'db_version'");
-// }
-// -----------------------------------------------------------------------------
+// =============================================================================
+// 【目标版本 1.0.7】：核心架构升级 - 配置文件静默修补
+// =============================================================================
+if (version_compare($current_db_version, '1.0.7', '<')) {
 
+    $config_path = ROOT_PATH . '/includes/config.php';
+
+    if (file_exists($config_path) && is_writable($config_path)) {
+        $content = file_get_contents($config_path);
+        $modified = false;
+
+        // 动作 1：注入 Session 强化防御代码 (物理注入)
+        if (strpos($content, 'session.save_handler') === false) {
+            $session_fix = "\n// --- Session 强化 (1.0.7 新增防御) ---\n" .
+                           "ini_set('session.save_handler', 'files');\n" .
+                           "ini_set('session.save_path', sys_get_temp_dir());\n";
+            
+            if (strpos($content, 'if (session_status() === PHP_SESSION_NONE)') !== false) {
+                $content = str_replace('if (session_status() === PHP_SESSION_NONE)', $session_fix . 'if (session_status() === PHP_SESSION_NONE)', $content);
+                $modified = true;
+            }
+        }
+
+        // 动作 2：注入 REDIS_ENABLED 常量 (物理注入)
+        if (strpos($content, 'REDIS_ENABLED') === false) {
+            $redis_fix = "\n// --- 2. Redis 配置 (1.0.7 性能开关) ---\n" .
+                         "define('REDIS_ENABLED', false); // 升级后默认关闭，请到后台开启\n" .
+                         "define('REDIS_HOST', '127.0.0.1');\n" .
+                         "define('REDIS_PORT', 6379);\n" .
+                         "define('REDIS_PASS', ''); \n" .
+                         "define('REDIS_DB', 0);\n";
+            
+            if (strpos($content, '// --- 1. 数据库配置 ---') !== false) {
+                $content = str_replace('// --- 1. 数据库配置 ---', $redis_fix . '// --- 1. 数据库配置 ---', $content);
+                $modified = true;
+            }
+        }
+
+        if ($modified) {
+            file_put_contents($config_path, $content);
+        }
+    }
+
+    $pdo->exec("INSERT IGNORE INTO settings (key_name, value) VALUES ('redis_enabled', '0')");
+
+    $pdo->exec("UPDATE settings SET value = '1.0.7' WHERE key_name = 'db_version'");
+    $current_db_version = '1.0.7';
+}
+
+// =============================================================================
+// 【目标版本 1.0.8】：多媒体画廊升级 - 增加前台/后台视频支持
+// =============================================================================
+if (version_compare($current_db_version, '1.0.8', '<')) {
+    
+    // 视频功能不需要改动数据库结构，这里只做版本号跃迁，为下一次迭代打底
+    $pdo->exec("UPDATE settings SET value = '1.0.8' WHERE key_name = 'db_version'");
+    $current_db_version = '1.0.8';
+}
+// =============================================================================
+// 【目标版本 1.1.1】：新增第三方登录与用户积分系统
+// =============================================================================
+if (version_compare($current_db_version, '1.1.1', '<')) {
+
+    // 动作 1：users 表 - 安全追加第三方登录UID和积分/等级字段
+    $columns_to_add = [
+        'points'     => "INT(11) NOT NULL DEFAULT '0' COMMENT '用户当前积分'",
+        'level'      => "INT(11) NOT NULL DEFAULT '1' COMMENT '用户当前等级'",
+        'qq_uid'     => "VARCHAR(100) DEFAULT NULL COMMENT 'QQ登录UID'",
+        'wx_uid'     => "VARCHAR(100) DEFAULT NULL COMMENT '微信登录UID'",
+        'douyin_uid' => "VARCHAR(100) DEFAULT NULL COMMENT '抖音登录UID'"
+    ];
+
+    foreach ($columns_to_add as $col => $def) {
+        $check = $pdo->query("SHOW COLUMNS FROM users LIKE '{$col}'");
+        if ($check->rowCount() == 0) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN {$col} {$def}");
+        }
+    }
+
+    // 动作 2：users 表 - 尝试添加唯一索引 (使用 try-catch 静默忽略已存在的情况)
+    try { $pdo->exec("ALTER TABLE users ADD UNIQUE KEY `idx_qq_uid` (`qq_uid`)"); } catch(Exception $e) {}
+    try { $pdo->exec("ALTER TABLE users ADD UNIQUE KEY `idx_wx_uid` (`wx_uid`)"); } catch(Exception $e) {}
+    try { $pdo->exec("ALTER TABLE users ADD UNIQUE KEY `idx_douyin_uid` (`douyin_uid`)"); } catch(Exception $e) {}
+
+    // 动作 3：articles 表 - 安全追加文章积分限制字段
+    $check_view_points = $pdo->query("SHOW COLUMNS FROM articles LIKE 'view_points'");
+    if ($check_view_points->rowCount() == 0) {
+        $pdo->exec("ALTER TABLE articles ADD COLUMN view_points INT(11) NOT NULL DEFAULT '0' COMMENT '查看文章所需积分'");
+    }
+
+    // 动作 4：新建 points_log 表（积分变动日志）
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `points_log` (
+        `id` int(11) NOT NULL AUTO_INCREMENT,
+        `user_id` int(11) NOT NULL,
+        `action` varchar(50) NOT NULL COMMENT '变动类型(例如: daily_login, admin_add)',
+        `points_change` int(11) NOT NULL COMMENT '变动数量(正数增加，负数扣除)',
+        `description` varchar(255) DEFAULT NULL COMMENT '详细说明',
+        `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (`id`),
+        KEY `user_id` (`user_id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户积分变动日志';");
+
+    // 动作 5：settings 表 - 插入第三方登录和积分相关的默认配置
+    $new_settings = [
+        'enable_login_qq'     => '1',
+        'enable_login_wx'     => '1',
+        'enable_login_dy'     => '1',
+        'social_login_mode'   => 'aggregated',
+        'social_login_url'    => '',
+        'social_appid'        => '',
+        'social_appkey'       => '', // 建议保留为空，让用户自己填，这里按你数据库默认同步
+        'user_levels_config'  => '[{"level":1,"points":0,"name":"青铜会员"},{"level":2,"points":100,"name":"白银会员"},{"level":3,"points":500,"name":"黄金会员"},{"level":4,"points":1500,"name":"钻石会员"},{"level":5,"points":5000,"name":"星耀会员"}]'
+    ];
+
+    $stmt_insert = $pdo->prepare("INSERT IGNORE INTO settings (key_name, value) VALUES (?, ?)");
+    foreach ($new_settings as $k => $v) {
+        $stmt_insert->execute([$k, $v]);
+    }
+
+    // 动作 6：成功执行完毕后，更新用户的数据库版本号
+    $pdo->exec("UPDATE settings SET value = '1.1.1' WHERE key_name = 'db_version'");
+    $current_db_version = '1.1.1';
+}
 ?>

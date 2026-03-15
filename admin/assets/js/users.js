@@ -55,3 +55,43 @@ function confirmDeleteUser(userName, url) {
         window.location.href = url;
     }
 }
+/**
+ * ====================================================================
+ * 积分管理相关逻辑
+ * ====================================================================
+ */
+
+/**
+ * 打开积分调整弹窗
+ * @param {number} userId - 用户 ID
+ * @param {string} userName - 用户昵称
+ * @param {number} currentPoints - 当前积分
+ */
+function openPointsModal(userId, userName, currentPoints) {
+    document.getElementById('pointsModalUserId').value = userId;
+    document.getElementById('pointsModalUserName').innerText = userName;
+    document.getElementById('pointsModalCurrent').value = currentPoints;
+    
+    // 清空上次输入的内容
+    document.querySelector('input[name="points_change"]').value = '';
+    document.querySelector('input[name="description"]').value = '';
+    
+    document.getElementById('pointsModal').style.display = 'flex';
+}
+
+/**
+ * 关闭积分调整弹窗
+ */
+function closePointsModal() {
+    document.getElementById('pointsModal').style.display = 'none';
+}
+
+// 点击遮罩层关闭弹窗
+document.addEventListener('DOMContentLoaded', () => {
+    const modal = document.getElementById('pointsModal');
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closePointsModal();
+        }
+    });
+});

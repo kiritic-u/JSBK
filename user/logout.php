@@ -14,15 +14,20 @@
                                                                             
                                追求极致的美学                               
 **/
-// 1. 初始化 Session
+// 1. 【核心修复】必须先引入配置和 Redis 助手！
+require_once dirname(__DIR__) . '/includes/config.php';
+// 如果你的 config.php 没有自动引入 redis_helper，需要在这里手动加一行：
+require_once dirname(__DIR__) . '/includes/redis_helper.php';
+
+// 2. 初始化 Session
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// 2. 清空 Session 数组
+// 3. 清空 Session 数组
 $_SESSION = array();
 
-// 3. 删除 Session Cookie (彻底断开连接)
+// 4. 删除 Session Cookie
 if (ini_get("session.use_cookies")) {
     $params = session_get_cookie_params();
     setcookie(session_name(), '', time() - 42000,
@@ -31,15 +36,15 @@ if (ini_get("session.use_cookies")) {
     );
 }
 
-// 4. 销毁 Session
+// 5. 销毁 Session (此时销毁的就是 Redis 里的真实数据了)
 session_destroy();
 
-// 5. 关键：输出清除缓存的 Header，防止返回键“复活”
+// 6. 输出清除缓存的 Header
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
 
-// 6. 跳转回首页
+// 7. 跳转回首页
 header("Location: /");
 exit;
 ?>

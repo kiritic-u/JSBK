@@ -39,7 +39,7 @@ $career_axis = json_decode(htmlspecialchars_decode(conf('about_career_axis', '[]
 ];
 ?>
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link rel="stylesheet" href="https://cdn.staticfile.net/font-awesome/6.4.0/css/all.min.css">
 <link rel="stylesheet" href="../pages/assets/css/about.css?v=<?= time() ?>">
 
 <style>
